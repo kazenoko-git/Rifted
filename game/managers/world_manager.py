@@ -239,9 +239,9 @@ class WorldManager:
             t.set_world_position(np.array([entity_data['x'], entity_data['y'], entity_data['z']], dtype=np.float32))
             
             if 'model_path' in entity_data:
-                e.add_component(MeshRenderer(model_path=entity_data['model_path']))
+                e.add_component(MeshRenderer(model_path=entity_data['model_path'], shading_model="world"))
             else:
-                e.add_component(MeshRenderer(mesh=mesh, color=(1.0, 1.0, 1.0, 1.0)))
+                e.add_component(MeshRenderer(mesh=mesh, color=(1.0, 1.0, 1.0, 1.0), shading_model="world"))
                 
             if fade_in: e.add_component(FadeInEffect(duration=0.5))
             
@@ -271,7 +271,7 @@ class WorldManager:
             # But we can rely on Renderer to apply a default Panda Material if none exists.
             # However, to be safe, let's just rely on the Renderer's default material logic which we updated.
             
-            ground.add_component(MeshRenderer(mesh=meshes['terrain'], color=(1.0, 1.0, 1.0, 1.0)))
+            ground.add_component(MeshRenderer(mesh=meshes['terrain'], color=(1.0, 1.0, 1.0, 1.0), shading_model="world"))
             if fade_in: ground.add_component(FadeInEffect(duration=0.5))
             
             ground.add_component(StaticBody())
@@ -287,7 +287,7 @@ class WorldManager:
         wt.local_scale = np.array([100.0, 100.0, 1.0], dtype=np.float32)
         
         water_mesh = create_plane_mesh(1.0, 1.0)
-        water.add_component(MeshRenderer(mesh=water_mesh, color=(0.2, 0.4, 0.8, 0.8)))
+        water.add_component(MeshRenderer(mesh=water_mesh, color=(0.2, 0.4, 0.8, 0.8), shading_model="world"))
         water.add_component(Collider(BoxCollider(np.array([100.0, 100.0, 1.0], dtype=np.float32))))
         if fade_in: water.add_component(FadeInEffect(duration=0.5))
         water.add_component(StaticBody())

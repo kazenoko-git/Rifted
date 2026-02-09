@@ -125,7 +125,7 @@ class PlayerManager:
         """Applies visual and physical properties from config."""
         # Visuals
         if "model_path" in config:
-            entity.add_component(MeshRenderer(model_path=config["model_path"]))
+            entity.add_component(MeshRenderer(model_path=config["model_path"], shading_model="character"))
         
         # Animation
         if "animations" in config:

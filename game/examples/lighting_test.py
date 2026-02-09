@@ -43,14 +43,11 @@ class LightingTest(Application):
         # 2. Create Scene using the ECS
         self._create_scene()
         
-        # 3. Load Shaders (After scene creation to tag entities)
-        self._load_shaders()
-        
-        # 4. Create Lights using the ECS
+        # 3. Create Lights using the ECS
         self._create_lights()
         
-        # 5. Apply Shaders to Scene
-        self._apply_toon_shader()
+        # 4. Apply Outline Shells (Characters Only)
+        self._apply_outlines()
 
         # 6. Input state for single-press toggle
         self._v_key_pressed = False
@@ -59,33 +56,9 @@ class LightingTest(Application):
         logger.info("Controls: WASD to Move, Hold Right Click + Mouse to Look.")
         logger.info("Debug: 'V' to toggle Shadow Map View, 'L' to rotate Sun.")
 
-    def _load_shaders(self):
-        """Load the custom toon shader."""
+    def _load_outline_shader(self):
+        """Load the outline shader for inverted hull rendering."""
         shader_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../shaders"))
-        
-        # Load Toon Shader (Characters)
-        try:
-            self.toon_shader = PandaShader.load(
-                PandaShader.SL_GLSL,
-                vertex=os.path.join(shader_dir, "toon.vert"),
-                fragment=os.path.join(shader_dir, "toon.frag")
-            )
-        except Exception as e:
-            logger.error(f"Failed to load toon shader: {e}")
-            self.toon_shader = None
-
-        # Load World Shader (Terrain/Environment)
-        try:
-            self.world_shader = PandaShader.load(
-                PandaShader.SL_GLSL,
-                vertex=os.path.join(shader_dir, "world.vert"),
-                fragment=os.path.join(shader_dir, "world.frag")
-            )
-        except Exception as e:
-            logger.error(f"Failed to load world shader: {e}")
-            self.world_shader = None
-
-        # Load Outline Shader
         try:
             self.outline_shader = PandaShader.load(
                 PandaShader.SL_GLSL,
@@ -105,7 +78,7 @@ class LightingTest(Application):
         ground.add_component(Transform())
         ground.get_component(Transform).set_world_position(np.array([0, 0, 0], dtype=np.float32))
         ground.get_component(Transform).set_local_scale(np.array([40, 40, 1], dtype=np.float32))
-        ground.add_component(MeshRenderer(mesh=create_plane_mesh(), color=(0.8, 0.8, 0.8, 1.0)))
+        ground.add_component(MeshRenderer(mesh=create_plane_mesh(), color=(0.8, 0.8, 0.8, 1.0), shading_model="world"))
         ground.tag = "world"
         self.scene_entities.append(ground)
 
@@ -115,7 +88,7 @@ class LightingTest(Application):
         sphere_transform.set_local_position(np.array([0, 0, 2], dtype=np.float32))
         sphere_transform.set_local_scale(np.array([2, 2, 2], dtype=np.float32))
         sphere.add_component(sphere_transform)
-        sphere.add_component(MeshRenderer(mesh=create_sphere_mesh(), color=(1.0, 0.2, 0.2, 1.0)))
+        sphere.add_component(MeshRenderer(mesh=create_sphere_mesh(), color=(1.0, 0.2, 0.2, 1.0), shading_model="character"))
         sphere.tag = "character"
         self.scene_entities.append(sphere)
 
@@ -126,7 +99,7 @@ class LightingTest(Application):
         cube_transform.set_local_rotation(quaternion_from_euler(np.radians(np.array([0.0, 0.0, 35.0], dtype=np.float32))))
         cube_transform.set_local_scale(np.array([3, 3, 3], dtype=np.float32))
         cube.add_component(cube_transform)
-        cube.add_component(MeshRenderer(mesh=create_cube_mesh(), color=(0.2, 1.0, 0.2, 1.0)))
+        cube.add_component(MeshRenderer(mesh=create_cube_mesh(), color=(0.2, 1.0, 0.2, 1.0), shading_model="character"))
         cube.tag = "character" # Changed to character to get Toon Shader + Outline
         self.scene_entities.append(cube)
 
@@ -136,7 +109,7 @@ class LightingTest(Application):
         pillar_transform.set_local_position(np.array([-8, 5, 4], dtype=np.float32))
         pillar_transform.set_local_scale(np.array([1, 1, 8.0], dtype=np.float32))
         pillar.add_component(pillar_transform)
-        pillar.add_component(MeshRenderer(mesh=create_cube_mesh(), color=(0.2, 0.2, 1.0, 1.0)))
+        pillar.add_component(MeshRenderer(mesh=create_cube_mesh(), color=(0.2, 0.2, 1.0, 1.0), shading_model="character"))
         pillar.tag = "character"
         self.scene_entities.append(pillar)
 
@@ -179,12 +152,14 @@ class LightingTest(Application):
         # We want vector TO light, so negate
         self.sun_direction = Vec3(-dir_x, -dir_y, -dir_z)
 
-    def _apply_toon_shader(self):
-        if not self.toon_shader or not self.world_shader:
+    def _apply_outlines(self):
+        """Apply outline shells to character meshes (non-world)."""
+        self._load_outline_shader()
+        if not self.outline_shader:
             return
-        self.renderer.backend.base.taskMgr.doMethodLater(0.1, self._apply_shader_task, "ApplyShaderTask")
+        self.renderer.backend.base.taskMgr.doMethodLater(0.1, self._apply_outline_task, "ApplyOutlineTask")
 
-    def _apply_shader_task(self, task):
+    def _apply_outline_task(self, task):
         for entity in self.scene_entities:
             if hasattr(entity, '_shader_applied') and entity._shader_applied:
                 continue
@@ -193,48 +168,20 @@ class LightingTest(Application):
             if mesh_renderer and mesh_renderer._node_path:
                 np = mesh_renderer._node_path
                 
-                # Select Shader based on Tag
-                if hasattr(entity, 'tag') and entity.tag == "world":
-                    np.setShader(self.world_shader)
-                else:
-                    np.setShader(self.toon_shader)
+                # Apply Outline (Inverted Hull) only to characters
+                if hasattr(entity, 'tag') and entity.tag == "character":
+                    old_outline = np.find("outline_shell")
+                    if not old_outline.isEmpty():
+                        old_outline.removeNode()
+                        
+                    outline = np.copyTo(np)
+                    outline.setName("outline_shell")
+                    outline.clearTransform()
                     
-                    # --- Apply Outline (Inverted Hull) ---
-                    if self.outline_shader:
-                        # Remove existing outline if any (for reload safety)
-                        old_outline = np.find("outline_shell")
-                        if not old_outline.isEmpty():
-                            old_outline.removeNode()
-                            
-                        # Create outline shell
-                        outline = np.copyTo(np)
-                        outline.setName("outline_shell")
-                        
-                        # FIX: Reset transform to prevent double-transformation (Parent + Local)
-                        outline.clearTransform()
-                        
-                        outline.setShader(self.outline_shader)
-                        outline.setShaderInput("u_outline_width", 0.05) # Thinner, cleaner outline
-                        outline.setShaderInput("u_outline_color", Vec4(0, 0, 0, 1)) # Black
-                        # FIX: Cull Front faces (CCW) to see the inside (Back/CW) of the shell
-                        outline.setAttrib(CullFaceAttrib.make(CullFaceAttrib.MCullCounterClockwise))
-                
-                # Set Uniforms
-                np.setShaderInput("u_sun_direction", self.sun_direction) # Initial set
-                np.setShaderInput("u_sun_color", Vec4(1.0, 0.95, 0.8, 1.0))
-                np.setShaderInput("u_ambient_color", Vec4(0.3, 0.3, 0.4, 1.0))
-                
-                # Only set Toon uniforms for non-world entities to avoid "Shader input not present" errors
-                if entity.tag != "world":
-                    np.setShaderInput("u_shadow_color", Vec4(0.1, 0.1, 0.3, 1.0))
-                    np.setShaderInput("u_toon_bands", 3.0)
-                
-                if hasattr(mesh_renderer, 'color'):
-                    c = mesh_renderer.color
-                    color_vec = Vec4(c[0], c[1], c[2], c[3] if len(c) > 3 else 1.0)
-                    np.setShaderInput("u_object_color", color_vec)
-                else:
-                    np.setShaderInput("u_object_color", Vec4(1, 1, 1, 1))
+                    outline.setShader(self.outline_shader)
+                    outline.setShaderInput("u_outline_width", 0.05)
+                    outline.setShaderInput("u_outline_color", Vec4(0, 0, 0, 1))
+                    outline.setAttrib(CullFaceAttrib.make(CullFaceAttrib.MCullCounterClockwise))
                 
         return task.done
 

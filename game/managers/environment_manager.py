@@ -39,7 +39,8 @@ class EnvironmentManager:
         sun_renderer = MeshRenderer(
             mesh=create_sphere_mesh(radius=10.0, segments=32, rings=16), 
             color=(1.0, 1.0, 0.8, 1.0),
-            texture_path="assets/textures/sun.png"
+            texture_path="assets/textures/sun.png",
+            shading_model="world",
         )
         sun.add_component(sun_renderer)
         
@@ -59,12 +60,14 @@ class EnvironmentManager:
         moon_renderer = MeshRenderer(
             mesh=create_sphere_mesh(radius=8.0, segments=32, rings=16), 
             color=(0.8, 0.8, 1.0, 1.0),
-            texture_path="assets/textures/moon.png"
+            texture_path="assets/textures/moon.png",
+            shading_model="world",
         )
         moon.add_component(moon_renderer)
         
         moon_light = DirectionalLight(color=(0.2, 0.2, 0.3), intensity=1.0)
-        moon_light.cast_shadows = True
+        # Keep a single shadow map for the global sun to avoid shadow-map conflicts
+        moon_light.cast_shadows = False
         moon_light.shadow_map_size = 2048
         moon_light.shadow_film_size = 1000.0
         moon_light.shadow_near_far = (1.0, 2000.0)

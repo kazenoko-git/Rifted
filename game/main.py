@@ -110,7 +110,7 @@ class Eternae(Application):
         ground.add_component(Transform())
         ground.get_component(Transform).set_world_position(np.array([0, 0, 0], dtype=np.float32))
         ground.get_component(Transform).set_local_scale(np.array([20, 20, 1], dtype=np.float32))
-        ground.add_component(MeshRenderer(mesh=create_plane_mesh(), color=(0.5, 0.5, 0.5, 1.0)))
+        ground.add_component(MeshRenderer(mesh=create_plane_mesh(), color=(0.5, 0.5, 0.5, 1.0), shading_model="world"))
         
         # Add Physics so player stands on it (Size 20x20x0.1)
         ground.add_component(Collider(BoxCollider(np.array([20.0, 20.0, 0.1], dtype=np.float32))))
@@ -123,7 +123,7 @@ class Eternae(Application):
         # Rotate slightly to see shading
         q_cube = quaternion_from_euler(np.radians(np.array([45.0, 45.0, 0.0], dtype=np.float32)))
         cube.get_component(Transform).set_world_rotation(q_cube)
-        cube.add_component(MeshRenderer(mesh=create_cube_mesh(), color=(1.0, 0.2, 0.2, 1.0)))
+        cube.add_component(MeshRenderer(mesh=create_cube_mesh(), color=(1.0, 0.2, 0.2, 1.0), shading_model="character"))
 
         # 3. Directional Light (Sun)
         sun = self.world.create_entity()

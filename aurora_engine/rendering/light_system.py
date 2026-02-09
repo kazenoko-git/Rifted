@@ -9,7 +9,7 @@ from aurora_engine.core.logging import get_logger
 from panda3d.core import AmbientLight as PandaAmbientLight
 from panda3d.core import DirectionalLight as PandaDirectionalLight
 from panda3d.core import PointLight as PandaPointLight
-from panda3d.core import Vec4, NodePath, BitMask32
+from panda3d.core import Vec4, Vec3, NodePath, BitMask32
 
 logger = get_logger()
 
@@ -33,6 +33,11 @@ class LightSystem(System):
         should_log = self._debug_log_timer > 5.0 # Log every 5 seconds
         if should_log:
             self._debug_log_timer = 0.0
+
+        ambient_color = Vec3(0.0, 0.0, 0.0)
+        directional_color = Vec3(0.0, 0.0, 0.0)
+        sun_dir = Vec3(0.0, 1.0, -1.0)
+        have_sun = False
         
         for entity in entities:
             light = entity.get_component(Light)
@@ -44,6 +49,21 @@ class LightSystem(System):
                 
             if light._backend_handle:
                 self._update_light(entity, light, should_log)
+
+            # Collect global lighting for shaders
+            if isinstance(light, AmbientLight):
+                c = light.color * light.intensity
+                ambient_color += Vec3(c[0], c[1], c[2])
+
+            if isinstance(light, DirectionalLight):
+                # Prefer the first shadow-casting directional as the sun
+                if (not have_sun) or light.cast_shadows:
+                    c = light.color * light.intensity
+                    directional_color = Vec3(c[0], c[1], c[2])
+                    sun_dir = self._get_directional_light_vector(entity, light)
+                    have_sun = True
+
+        self._apply_global_shader_inputs(ambient_color, directional_color, sun_dir)
 
     def on_entity_removed(self, entity):
         """Clean up light when entity is removed."""
@@ -133,3 +153,22 @@ class LightSystem(System):
                  lens.setFilmSize(light.shadow_film_size, light.shadow_film_size)
              if lens.getNear() != light.shadow_near_far[0] or lens.getFar() != light.shadow_near_far[1]:
                  lens.setNearFar(*light.shadow_near_far)
+
+    def _get_directional_light_vector(self, entity, light: DirectionalLight) -> Vec3:
+        """Return world-space vector pointing TO the light (for shaders)."""
+        if light._backend_handle:
+            # Panda forward is +Y, light direction is forward; we want vector TO light => -forward
+            forward = light._backend_handle.getQuat().xform(Vec3(0, 1, 0))
+            if forward.length() > 0.0001:
+                forward.normalize()
+            return -forward
+        return Vec3(0.0, 1.0, -1.0)
+
+    def _apply_global_shader_inputs(self, ambient_color: Vec3, directional_color: Vec3, sun_dir: Vec3):
+        """Apply shared lighting inputs to the scene graph so all shaders see them."""
+        if not hasattr(self.renderer.backend, 'scene_graph'):
+            return
+        sg = self.renderer.backend.scene_graph
+        sg.setShaderInput("u_ambient_color", Vec4(ambient_color[0], ambient_color[1], ambient_color[2], 1.0))
+        sg.setShaderInput("u_sun_color", Vec4(directional_color[0], directional_color[1], directional_color[2], 1.0))
+        sg.setShaderInput("u_sun_direction", sun_dir)

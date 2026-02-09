@@ -9,7 +9,7 @@ from aurora_engine.scene.transform import Transform
 from aurora_engine.rendering.mesh import MeshRenderer, Mesh
 from aurora_engine.core.logging import get_logger
 from aurora_engine.utils.profiler import profile_section
-from panda3d.core import Vec4, BillboardEffect, Filename, getModelPath, Point3, NodePath, Material, TransparencyAttrib
+from panda3d.core import Vec4, BillboardEffect, Filename, getModelPath, Point3, NodePath, Material, TransparencyAttrib, Shader as PandaShader
 import os
 
 class Renderer:
@@ -31,6 +31,10 @@ class Renderer:
         # Active cameras
         self.cameras: List[Camera] = []
         self.main_camera: Camera = None
+
+        # Default shaders (toon + world)
+        self._shader_world = None
+        self._shader_toon = None
         
         self.logger.info("Renderer initialized")
 
@@ -42,12 +46,39 @@ class Renderer:
         # Note: We do NOT call setShaderAuto() here because simplepbr handles shaders.
         # Calling it would conflict with simplepbr's PBR shader.
 
+        self._load_default_shaders()
         self._setup_cel_shading_pipeline()
 
     def _setup_cel_shading_pipeline(self):
         """Configure pipeline for cel-shading."""
         from aurora_engine.rendering.post_process import OutlineEffect, BloomEffect
         pass
+
+    def _load_default_shaders(self):
+        """Load built-in toon and world shaders."""
+        shader_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "shaders"))
+
+        try:
+            self._shader_toon = PandaShader.load(
+                PandaShader.SL_GLSL,
+                vertex=os.path.join(shader_dir, "toon.vert"),
+                fragment=os.path.join(shader_dir, "toon.frag"),
+            )
+            self.logger.info("Loaded toon shader")
+        except Exception as e:
+            self.logger.error(f"Failed to load toon shader: {e}")
+            self._shader_toon = None
+
+        try:
+            self._shader_world = PandaShader.load(
+                PandaShader.SL_GLSL,
+                vertex=os.path.join(shader_dir, "world.vert"),
+                fragment=os.path.join(shader_dir, "world.frag"),
+            )
+            self.logger.info("Loaded world shader")
+        except Exception as e:
+            self.logger.error(f"Failed to load world shader: {e}")
+            self._shader_world = None
 
     def register_camera(self, camera: Camera):
         """Register a camera for rendering."""
@@ -201,11 +232,43 @@ class Renderer:
         
         # --- UPDATE & MATERIAL APPLICATION (Runs every frame to handle dynamic node replacement) ---
         if hasattr(mesh_renderer, '_node_path') and mesh_renderer._node_path:
+            np = mesh_renderer._node_path
+
+            # --- Shader Selection (Material overrides default shading model) ---
+            if mesh_renderer.material:
+                mesh_renderer.material.apply(np)
+                backend_shader = mesh_renderer.material.shader._backend_shader if mesh_renderer.material.shader else None
+                if backend_shader:
+                    mesh_renderer._applied_shader = backend_shader
+                else:
+                    mesh_renderer.material = None
+            if not mesh_renderer.material:
+                desired_shader = None
+                if mesh_renderer.shading_model == "character":
+                    desired_shader = self._shader_toon
+                else:
+                    desired_shader = self._shader_world
+
+                if desired_shader and mesh_renderer._applied_shader is not desired_shader:
+                    np.setShader(desired_shader)
+                    mesh_renderer._applied_shader = desired_shader
+
+            # --- Per-Object Shader Inputs ---
+            # Always set object color (used by both shaders)
+            if hasattr(mesh_renderer, 'color'):
+                c = mesh_renderer.color
+                np.setShaderInput("u_object_color", Vec4(c[0], c[1], c[2], c[3] if len(c) > 3 else 1.0))
+
+            # Toon-only inputs
+            if mesh_renderer.shading_model == "character":
+                np.setShaderInput("u_toon_bands", float(mesh_renderer.toon_bands))
+                sc = mesh_renderer.shadow_color
+                np.setShaderInput("u_shadow_color", Vec4(sc[0], sc[1], sc[2], sc[3] if len(sc) > 3 else 1.0))
             
             # --- Material Fix for Lighting ---
             # Ensure a Panda Material is attached for lighting if none exists
             # This is critical for setShaderAuto() to work correctly
-            if not mesh_renderer._node_path.hasMaterial():
+            if not np.hasMaterial():
                 m = Material()
                 m.setBaseColor((1, 1, 1, 1)) # Default to white, will be modulated by vertex/flat color
                 m.setAmbient((1, 1, 1, 1))   # Let ambient light control ambient color fully
@@ -213,41 +276,41 @@ class Renderer:
                 m.setSpecular((0.2, 0.2, 0.2, 1)) # Moderate specular for definition
                 m.setEmission((0.0, 0.0, 0.0, 1)) # ZERO emission
                 m.setRoughness(0.6) # Lower roughness to see lighting better
-                mesh_renderer._node_path.setMaterial(m, 1)
+                np.setMaterial(m, 1)
 
             # Update transform
             pos = transform.get_world_position()
             rot = transform.get_world_rotation()
             scale = transform.get_world_scale()
-            self.backend.update_mesh_transform(mesh_renderer._node_path, pos, rot, scale)
+            self.backend.update_mesh_transform(np, pos, rot, scale)
             
             # --- Color Application Logic ---
             # 1. Prioritize vertex colors
             if mesh_renderer.mesh and mesh_renderer.mesh.colors is not None and len(mesh_renderer.mesh.colors) > 0:
                 # This mesh has vertex colors. Tell Panda to use them for lighting.
-                mesh_renderer._node_path.setColorOff(1)
+                np.setColorOff(1)
             else:
                 # 2. No vertex colors, check for texture
                 if hasattr(mesh_renderer, 'texture_path') and mesh_renderer.texture_path:
                      # Has a texture, set color to white to not tint it.
-                     mesh_renderer._node_path.setColor(1, 1, 1, 1, 1)
+                    np.setColor(1, 1, 1, 1, 1)
                 elif hasattr(mesh_renderer, 'color'):
                      # 3. No vertex colors or texture, use the flat color.
-                     mesh_renderer._node_path.setColor(Vec4(*mesh_renderer.color), 1)
+                     np.setColor(Vec4(*mesh_renderer.color), 1)
 
             # Transparency
             if mesh_renderer.alpha < 1.0:
-                mesh_renderer._node_path.setTransparency(TransparencyAttrib.MAlpha)
-                mesh_renderer._node_path.setAlphaScale(mesh_renderer.alpha)
+                np.setTransparency(TransparencyAttrib.MAlpha)
+                np.setAlphaScale(mesh_renderer.alpha)
             else:
                 # Ensure depth write is ON for opaque objects to prevent "flat" look due to sorting
-                mesh_renderer._node_path.setTransparency(TransparencyAttrib.MNone)
+                np.setTransparency(TransparencyAttrib.MNone)
             
             # Visibility
             if not mesh_renderer.visible:
-                mesh_renderer._node_path.hide()
+                np.hide()
             else:
-                mesh_renderer._node_path.show()
+                np.show()
 
     def unload_mesh(self, mesh: Mesh):
         """Unload a mesh from the backend."""

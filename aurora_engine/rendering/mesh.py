@@ -134,7 +134,15 @@ class MeshRenderer(Component):
     Renders a mesh with a material.
     """
 
-    def __init__(self, mesh: Optional[Mesh] = None, material: Optional[Material] = None, color: Tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0), model_path: Optional[str] = None, texture_path: Optional[str] = None):
+    def __init__(
+        self,
+        mesh: Optional[Mesh] = None,
+        material: Optional[Material] = None,
+        color: Tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
+        model_path: Optional[str] = None,
+        texture_path: Optional[str] = None,
+        shading_model: str = "world",  # "world" (smooth) or "character" (toon)
+    ):
         super().__init__()
 
         self.mesh = mesh
@@ -142,6 +150,7 @@ class MeshRenderer(Component):
         self.color = color # Simple color override if no material
         self.model_path = model_path
         self.texture_path = texture_path # Path to texture image
+        self.shading_model = shading_model
         self.alpha = 1.0 # For fade-in effects
         self._node_path = None # Handle to Panda3D node
 
@@ -149,12 +158,17 @@ class MeshRenderer(Component):
         self._last_pos = None
         self._last_rot = None
         self._last_scale = None
+        self._applied_shader = None
 
         # Rendering settings
         self.cast_shadows = True
         self.receive_shadows = True
         self.visible = True
         self.billboard = False # If true, always face camera
+
+        # Toon-specific defaults (used only when shading_model == "character")
+        self.toon_bands = 3.0
+        self.shadow_color = (0.1, 0.1, 0.3, 1.0)
         
         # logger.debug("MeshRenderer component created")
 
