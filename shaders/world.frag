@@ -11,8 +11,6 @@ in vec3 v_world_pos;
 in vec3 v_world_normal;
 in vec2 v_uv;
 in vec4 v_shadow_pos;
-in vec3 v_tangent;
-in vec3 v_bitangent;
 
 // Camera
 uniform vec3 p3d_CameraPosition;
@@ -20,7 +18,7 @@ uniform vec3 p3d_CameraPosition;
 // Textures (optional, safe to leave unbound)
 uniform sampler2D p3d_Texture0;        // Albedo
 uniform sampler2D p3d_Texture1;        // Metallic (B) / Roughness (G)
-uniform sampler2D p3d_Texture2;        // Normal map (tangent space, +Y)
+uniform sampler2D p3d_Texture2;        // Reserved for future normal-map support
 uniform sampler2D p3d_Texture3;        // AO
 uniform sampler2D p3d_Texture4;        // Emissive
 uniform sampler2DShadow p3d_LightShadowMap0;
@@ -69,38 +67,24 @@ vec3 FresnelSchlick(float cosTheta, vec3 F0) {
     return F0 + (1.0 - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
 }
 
-// --- Tangent space normal ---
-vec3 get_normal() {
-    vec3 N = normalize(v_world_normal);
-    vec3 T = normalize(v_tangent);
-    vec3 B = normalize(v_bitangent);
-
-    vec3 map = texture(p3d_Texture2, v_uv).rgb * 2.0 - 1.0;
-    if (length(map) < 0.001) {
-        return N;
-    }
-    map.xy *= u_normal_scale;
-    mat3 TBN = mat3(T, B, N);
-    return normalize(TBN * map);
-}
-
 // --- Shadow sampling (3x3 PCF) ---
 float shadow_factor(vec3 N, vec3 L) {
     if (u_use_shadows == 0 || v_shadow_pos.w <= 0.0) return 1.0;
 
     vec3 proj = v_shadow_pos.xyz / v_shadow_pos.w;
-    // v_shadow_pos is already biased to 0..1 by LightSystem
     if (proj.x < 0.0 || proj.x > 1.0 || proj.y < 0.0 || proj.y > 1.0 || proj.z < 0.0 || proj.z > 1.0) {
         return 1.0;
     }
 
     float bias = max(0.0005, 0.002 * (1.0 - dot(N, L)));
-    vec2 texel = 1.0 / textureSize(p3d_LightShadowMap0, 0);
-
     float shadow = 0.0;
+    float texel_offset = 1.0 / 2048.0;
     for (int x = -1; x <= 1; ++x) {
         for (int y = -1; y <= 1; ++y) {
-            shadow += texture(p3d_LightShadowMap0, vec3(proj.xy + vec2(x, y) * texel, proj.z - bias));
+            vec4 sample_coord = v_shadow_pos;
+            sample_coord.xy += vec2(x, y) * texel_offset * v_shadow_pos.w;
+            sample_coord.z -= bias * v_shadow_pos.w;
+            shadow += textureProj(p3d_LightShadowMap0, sample_coord);
         }
     }
     return shadow / 9.0;
@@ -119,7 +103,7 @@ void main() {
 
     vec3 emissive = texture(p3d_Texture4, v_uv).rgb * u_emissive_color * u_emissive_strength;
 
-    vec3 N = get_normal();
+    vec3 N = normalize(v_world_normal);
     vec3 V = normalize(p3d_CameraPosition - v_world_pos);
     vec3 L = (length(u_sun_direction) > 0.0001) ? normalize(u_sun_direction) : vec3(0.0, 1.0, 0.0);
     vec3 H = normalize(V + L);
