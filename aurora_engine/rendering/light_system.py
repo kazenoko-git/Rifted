@@ -203,6 +203,13 @@ class LightSystem(System):
         sg.setShaderInput("u_ambient_color", Vec4(ambient_color[0], ambient_color[1], ambient_color[2], 1.0))
         sg.setShaderInput("u_sun_color", Vec4(directional_color[0], directional_color[1], directional_color[2], 1.0))
         sg.setShaderInput("u_sun_direction", sun_dir)
+        # Default PBR parameters for world shader (can be overridden per-object)
+        sg.setShaderInput("u_metallic", 0.0)
+        sg.setShaderInput("u_roughness", 0.8)
+        sg.setShaderInput("u_ao", 1.0)
+        sg.setShaderInput("u_normal_scale", 1.0)
+        sg.setShaderInput("u_emissive_color", Vec3(0.0, 0.0, 0.0))
+        sg.setShaderInput("u_emissive_strength", 0.0)
         
         # Calculate and set Shadow MVP if we have a sun with shadows
         use_shadows = False
