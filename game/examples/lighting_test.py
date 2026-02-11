@@ -73,12 +73,19 @@ class LightingTest(Application):
         """Creates the scene geometry using the engine's ECS."""
         self.scene_entities = []
 
-        # Ground
+        # Ground (Replaced Plane with Cube as requested)
         ground = self.world.create_entity()
         ground.add_component(Transform())
-        ground.get_component(Transform).set_world_position(np.array([0, 0, 0], dtype=np.float32))
-        ground.get_component(Transform).set_local_scale(np.array([40, 40, 1], dtype=np.float32))
-        ground.add_component(MeshRenderer(mesh=create_plane_mesh(), color=(0.8, 0.8, 0.8, 1.0), shading_model="world"))
+        ground.get_component(Transform).set_world_position(np.array([0, 0, -1.0], dtype=np.float32)) # Lowered slightly to keep surface at 0
+        ground.get_component(Transform).set_local_scale(np.array([40, 40, 2], dtype=np.float32)) # Thickness of 2
+        
+        # Re-enable shadow casting for the ground if using complexpbr, as it handles self-shadowing better
+        # But let's keep it False for now to be safe, unless complexpbr needs it.
+        # complexpbr usually handles shadows well.
+        ground_renderer = MeshRenderer(mesh=create_cube_mesh(), color=(0.8, 0.8, 0.8, 1.0), shading_model="world")
+        ground_renderer.cast_shadows = True # Re-enabled for complexpbr
+        ground.add_component(ground_renderer)
+        
         ground.tag = "world"
         self.scene_entities.append(ground)
 

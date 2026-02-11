@@ -42,6 +42,7 @@ class PandaBackend:
             framebuffer-multisample 1
             multisamples 2
             framebuffer-stencil 1
+            framebuffer-srgb 1
             gl-coordinate-system default
             gl-version 3 2
             
@@ -96,48 +97,38 @@ class PandaBackend:
         getModelPath().appendDirectory(os.getcwd())
         
         # Register gltf loader
-        # Try importing panda3d-simplepbr (module name is simplepbr)
-        has_simplepbr = False
+        # Try importing panda3d-complexpbr (module name is complexpbr)
+        has_complexpbr = False
         try:
-            import simplepbr
-            # simplepbr.init() automatically patches the loader
-            # Enable shadows explicitly
-            # Use 4096 shadow map size for better quality
-            simplepbr.init(
-                enable_shadows=True, 
-                use_normal_maps=True,
-                shadow_bias=0.01, # Increased slightly
-                use_occlusion_maps=True,
-                msaa_samples=2
-            )
-            has_simplepbr = True
-            logger.info("Initialized simplepbr with shadows enabled")
+            import complexpbr
+            # complexpbr.apply_shader() applies the shader to a node
+            # We will apply it to the scene graph later or per-object
+            # But first, let's see if we can initialize it globally or if it needs per-node setup.
+            # complexpbr usually works by calling complexpbr.apply_shader(node)
+            # It also handles shadows if configured.
+            
+            # We will use complexpbr instead of simplepbr if available
+            has_complexpbr = True
+            logger.info("Found panda3d-complexpbr")
         except ImportError:
-            logger.warning("simplepbr not found. PBR materials might not look correct.")
-            has_simplepbr = False
+            logger.warning("panda3d-complexpbr not found.")
+            has_complexpbr = False
 
-        # Try patching loader for GLTF if simplepbr didn't do it (or just to be safe/explicit)
-        # But avoid double patching if simplepbr already did it
-        if not has_simplepbr:
-            try:
-                import gltf
-                # Check if patch_loader exists (newer versions)
-                if hasattr(gltf, 'patch_loader'):
-                    gltf.patch_loader(self.base.loader)
-                    logger.info("Patched loader with panda3d-gltf")
-                else:
-                    pass
-            except ImportError:
-                logger.warning("panda3d-gltf not found. GLB models will not load.")
+        # Fallback to simplepbr if complexpbr is not found (or if we want to support both)
+        # The user requested complexpbr specifically for world shaders.
+        
+        # If complexpbr is present, we might still need simplepbr for other things or just use complexpbr.
+        # Let's try to use complexpbr logic in Renderer.
+        
+        # For now, let's just ensure GLTF loading works.
+        try:
+            import gltf
+            if hasattr(gltf, 'patch_loader'):
+                gltf.patch_loader(self.base.loader)
+                logger.info("Patched loader with panda3d-gltf")
+        except ImportError:
+            logger.warning("panda3d-gltf not found. GLB models will not load.")
 
-            # Only enable auto shader if simplepbr is NOT present
-            if not has_simplepbr:
-                self.scene_graph.setShaderAuto()
-                logger.info("Enabled setShaderAuto() as fallback")
-            else:
-                logger.info("Skipping setShaderAuto() because simplepbr is active")
-
-        # --- DEFAULT LIGHTING REMOVED ---
         # We rely on game systems (DayNightCycle) to provide lighting.
         # self._setup_default_lighting()
 

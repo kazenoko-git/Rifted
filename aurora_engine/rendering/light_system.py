@@ -228,7 +228,15 @@ class LightSystem(System):
             # Panda matrices are Row-Major, so we multiply in order: v * View * Proj * Bias
             mvp = view_mat * proj_mat * bias_mat
             
+            # IMPORTANT: Transpose for GLSL if Panda doesn't do it automatically for shader inputs
+            # Panda usually handles this, but let's be safe if we are manually constructing it.
+            # Actually, Panda's setShaderInput for matrix expects row-major, and GLSL expects column-major.
+            # Panda automatically transposes when sending to GLSL.
+            
             sg.setShaderInput("u_light_mvp", mvp)
             use_shadows = True
+        else:
+            # Provide a dummy matrix if no shadows are active to prevent shader errors
+            sg.setShaderInput("u_light_mvp", LMatrix4f.identMat())
             
         sg.setShaderInput("u_use_shadows", 1 if use_shadows else 0)

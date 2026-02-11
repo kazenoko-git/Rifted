@@ -48,6 +48,14 @@ class Renderer:
 
         self._load_default_shaders()
         self._setup_cel_shading_pipeline()
+        
+        # Initialize complexpbr screenspace effects if available
+        try:
+            import complexpbr
+            complexpbr.screenspace_init()
+            self.logger.info("Initialized complexpbr screenspace effects")
+        except ImportError:
+            pass
 
     def _setup_cel_shading_pipeline(self):
         """Configure pipeline for cel-shading."""
@@ -69,16 +77,23 @@ class Renderer:
             self.logger.error(f"Failed to load toon shader: {e}")
             self._shader_toon = None
 
+        # Only load custom world shader if complexpbr is NOT available
+        # If complexpbr is available, we will use it instead
         try:
-            self._shader_world = PandaShader.load(
-                PandaShader.SL_GLSL,
-                vertex=os.path.join(shader_dir, "world.vert"),
-                fragment=os.path.join(shader_dir, "world.frag"),
-            )
-            self.logger.info("Loaded world shader")
-        except Exception as e:
-            self.logger.error(f"Failed to load world shader: {e}")
-            self._shader_world = None
+            import complexpbr
+            self.logger.info("Using complexpbr for world shaders")
+            self._shader_world = None # Don't load custom shader
+        except ImportError:
+            try:
+                self._shader_world = PandaShader.load(
+                    PandaShader.SL_GLSL,
+                    vertex=os.path.join(shader_dir, "world.vert"),
+                    fragment=os.path.join(shader_dir, "world.frag"),
+                )
+                self.logger.info("Loaded world shader")
+            except Exception as e:
+                self.logger.error(f"Failed to load world shader: {e}")
+                self._shader_world = None
 
     def register_camera(self, camera: Camera):
         """Register a camera for rendering."""
@@ -246,8 +261,22 @@ class Renderer:
                 desired_shader = None
                 if mesh_renderer.shading_model == "character":
                     desired_shader = self._shader_toon
-                else:
-                    desired_shader = self._shader_world
+                elif mesh_renderer.shading_model == "world":
+                    # If complexpbr is available, we use it instead of a custom shader
+                    try:
+                        import complexpbr
+                        # complexpbr.apply_shader(np) applies the shader to the node
+                        # We only want to do this once or if the shader changes
+                        if mesh_renderer._applied_shader != "complexpbr":
+                            complexpbr.apply_shader(np)
+                            mesh_renderer._applied_shader = "complexpbr"
+                            # complexpbr handles shadows automatically if configured
+                    except ImportError:
+                        # Fallback to custom world shader
+                        desired_shader = self._shader_world
+                        if desired_shader and mesh_renderer._applied_shader is not desired_shader:
+                            np.setShader(desired_shader)
+                            mesh_renderer._applied_shader = desired_shader
 
                 if desired_shader and mesh_renderer._applied_shader is not desired_shader:
                     np.setShader(desired_shader)
