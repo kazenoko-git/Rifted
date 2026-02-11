@@ -43,6 +43,10 @@ out vec4 fragColor;
 
 // --- SHADOW MAPPING ---
 float get_shadow_factor(vec4 shadow_coord, float bias) {
+    if (shadow_coord.w <= 0.0) {
+        return 1.0;
+    }
+
     vec3 proj_coords = shadow_coord.xyz / shadow_coord.w;
     proj_coords = proj_coords * 0.5 + 0.5;
 
@@ -73,23 +77,24 @@ void main() {
 
     // Use Explicit World Space Sun Direction passed from Python
     // This avoids any confusion with Panda's View-Space light positions
-    vec3 L = normalize(u_sun_direction);
+    vec3 L = (length(u_sun_direction) > 0.0001) ? normalize(u_sun_direction) : normalize(vec3(0.3, 0.4, 0.85));
 
     // --- 1. DIFFUSE TERM ---
-    float NdotL = dot(N, L);
-    float light_intensity = max(NdotL, 0.0);
-
-    // Toon Bands
-    float bands = u_toon_bands > 0.0 ? u_toon_bands : 3.0;
-    float toon_intensity = ceil(light_intensity * bands) / bands;
+    float NdotL = max(dot(N, L), 0.0);
 
     // --- 2. SHADOW MAPPING ---
     // Minimal bias for ground plane
     float bias = max(0.001 * (1.0 - NdotL), 0.0002);
     float shadow = get_shadow_factor(v_shadow_coord, bias);
+    float lit_linear = NdotL * mix(0.60, 1.0, shadow);
 
-    // Combine
-    float final_light_factor = toon_intensity * shadow;
+    // Toon bands with soft transitions (anime style without harsh posterization)
+    float bands = max(u_toon_bands, 2.0);
+    float scaled = lit_linear * bands;
+    float base_band = floor(scaled) / bands;
+    float next_band = min((floor(scaled) + 1.0) / bands, 1.0);
+    float band_blend = smoothstep(0.30, 0.70, fract(scaled));
+    float toon_intensity = mix(base_band, next_band, band_blend);
 
     // --- 3. COLOR COMPOSITION ---
     vec3 obj_color = u_object_color.rgb;
@@ -98,26 +103,24 @@ void main() {
     vec3 light_color = u_sun_color.rgb;
     if (length(light_color) < 0.01) light_color = vec3(1.0);
 
-    vec3 lit_color = obj_color * light_color;
+    // FIX: Ensure ambient color is not too dark
+    vec3 ambient_color = max(u_ambient_color.rgb, vec3(0.3)); // Increased from 0.14 to 0.3
+    vec3 lit_color = obj_color * (ambient_color + light_color * toon_intensity);
 
     vec3 shadow_tint = u_shadow_color.rgb;
     if (length(shadow_tint) < 0.01) shadow_tint = vec3(0.1, 0.1, 0.3);
-    vec3 shadow_color = obj_color * shadow_tint;
 
-    // Hard Mix for clean anime look
-    // If light factor > 0.01, it's lit. Otherwise shadow.
-    // This prevents "muddy" transitions.
-    float mix_factor = step(0.01, final_light_factor);
+    // FIX: Make shadow color brighter
+    vec3 shadow_color = obj_color * (ambient_color * 0.95 + shadow_tint * 0.25);
+    shadow_color = max(shadow_color, obj_color * 0.2); // Ensure minimum brightness
 
-    // But we want the toon bands to show up in the lit area
-    // So we modulate the lit color by the toon intensity
-    // Actually, for pure 2-tone, we just want Lit vs Shadow.
-    // Let's stick to the mix based on shadow * diffuse.
-
-    // Soften the transition (Fade)
-    mix_factor = smoothstep(0.0, 0.35, final_light_factor);
+    // Soft fade between shadow and lit lobes for a Genshin-like transition.
+    float mix_factor = smoothstep(0.12, 0.62, lit_linear);
 
     vec3 final_color = mix(shadow_color, lit_color, mix_factor);
+
+    // FIX: Ensure final color is not black
+    final_color = max(final_color, obj_color * 0.1);
 
     // FORCE USAGE: Add a tiny fraction of shadow coord to color
     final_color += v_shadow_coord.rgb * 0.000001;

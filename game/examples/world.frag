@@ -6,6 +6,7 @@ uniform sampler2DShadow p3d_LightShadowMap0; // Panda auto-binds this if configu
 uniform vec3 u_sun_direction;
 uniform vec4 u_sun_color;
 uniform vec4 u_ambient_color;
+uniform int u_use_shadows;
 
 in vec3 v_normal;
 in vec2 v_uv;
@@ -14,6 +15,8 @@ in vec4 v_shadow_pos;
 out vec4 fragColor;
 
 float calculate_shadow(vec4 shadow_pos) {
+    if (u_use_shadows == 0) return 1.0;
+
     vec3 proj_coords = shadow_pos.xyz / shadow_pos.w;
     // Panda3D shadow maps are 0-1, but we need to handle the bias
     // The bias matrix is usually applied in vertex shader, assuming u_light_mvp handles it.

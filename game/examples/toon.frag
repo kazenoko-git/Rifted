@@ -7,6 +7,7 @@ uniform vec3 u_sun_direction;
 uniform vec4 u_sun_color;
 uniform vec4 u_ambient_color;
 uniform vec4 u_object_color; // Flat color if no texture
+uniform int u_use_shadows;
 
 // Toon Settings
 const float TOON_THRESHOLD = 0.5;
@@ -19,6 +20,8 @@ in vec4 v_shadow_pos;
 out vec4 fragColor;
 
 float calculate_shadow(vec4 shadow_pos) {
+    if (u_use_shadows == 0) return 1.0;
+
     // Same PCF logic as world shader
     float shadow = 0.0;
     vec2 texel_size = 1.0 / textureSize(p3d_LightShadowMap0, 0);

@@ -9,7 +9,7 @@ from aurora_engine.core.logging import get_logger
 from panda3d.core import AmbientLight as PandaAmbientLight
 from panda3d.core import DirectionalLight as PandaDirectionalLight
 from panda3d.core import PointLight as PandaPointLight
-from panda3d.core import Vec4, Vec3, NodePath, BitMask32
+from panda3d.core import Vec4, Vec3, NodePath, BitMask32, LMatrix4f
 
 logger = get_logger()
 
@@ -39,6 +39,9 @@ class LightSystem(System):
         sun_dir = Vec3(0.0, 1.0, -1.0)
         have_sun = False
         
+        sun_light_node = None
+        sun_lens = None
+        
         for entity in entities:
             light = entity.get_component(Light)
             
@@ -61,9 +64,14 @@ class LightSystem(System):
                     c = light.color * light.intensity
                     directional_color = Vec3(c[0], c[1], c[2])
                     sun_dir = self._get_directional_light_vector(entity, light)
+                    
+                    if light.cast_shadows and light._backend_handle:
+                        sun_light_node = light._backend_handle
+                        sun_lens = light._backend_handle.node().getLens()
+                        
                     have_sun = True
 
-        self._apply_global_shader_inputs(ambient_color, directional_color, sun_dir)
+        self._apply_global_shader_inputs(ambient_color, directional_color, sun_dir, sun_light_node, sun_lens)
 
     def on_entity_removed(self, entity):
         """Clean up light when entity is removed."""
@@ -132,6 +140,10 @@ class LightSystem(System):
         if not isinstance(light, AmbientLight):
             transform = entity.get_component(Transform)
             if transform:
+                # Force update of world transform to ensure we have the latest data
+                # This is critical if the transform was modified in the same frame (e.g. by input)
+                transform._update_world_transform()
+
                 pos = transform.get_world_position()
                 rot = transform.get_world_rotation()
                 
@@ -158,13 +170,32 @@ class LightSystem(System):
         """Return world-space vector pointing TO the light (for shaders)."""
         if light._backend_handle:
             # Panda forward is +Y, light direction is forward; we want vector TO light => -forward
+            # Wait, if we want vector TO light, it is the opposite of the light direction.
+            # Light direction is usually -Z in local space if looking down.
+            # But Panda DirectionalLight shines along +Y axis of the node.
+            # So the light direction vector is +Y transformed to world.
+            # We want vector TO light, so it is -Y transformed to world?
+            # No, if light shines along +Y, then vector TO light is -Y.
+            
+            # Let's check how we set up the sun.
+            # In lighting_test.py:
+            # dir_x = -math.sin(y) * math.cos(p) ...
+            # self.sun_direction = Vec3(-dir_x, -dir_y, -dir_z)
+            # This manual calculation seems to be "To Light".
+            
+            # Here we extract it from the node.
+            # The node's forward vector (Y+) is the direction the light is pointing.
             forward = light._backend_handle.getQuat().xform(Vec3(0, 1, 0))
             if forward.length() > 0.0001:
                 forward.normalize()
+            
+            # We want vector TO light source.
+            # If light shines along Forward, then source is behind.
             return -forward
+
         return Vec3(0.0, 1.0, -1.0)
 
-    def _apply_global_shader_inputs(self, ambient_color: Vec3, directional_color: Vec3, sun_dir: Vec3):
+    def _apply_global_shader_inputs(self, ambient_color: Vec3, directional_color: Vec3, sun_dir: Vec3, sun_light_node: NodePath = None, sun_lens = None):
         """Apply shared lighting inputs to the scene graph so all shaders see them."""
         if not hasattr(self.renderer.backend, 'scene_graph'):
             return
@@ -172,3 +203,32 @@ class LightSystem(System):
         sg.setShaderInput("u_ambient_color", Vec4(ambient_color[0], ambient_color[1], ambient_color[2], 1.0))
         sg.setShaderInput("u_sun_color", Vec4(directional_color[0], directional_color[1], directional_color[2], 1.0))
         sg.setShaderInput("u_sun_direction", sun_dir)
+        
+        # Calculate and set Shadow MVP if we have a sun with shadows
+        use_shadows = False
+        if sun_light_node and sun_lens:
+            # View Matrix: World -> Light
+            # light_node.getMat(sg) gives Light -> World
+            # We want World -> Light, so invert it.
+            view_mat = sun_light_node.getMat(sg)
+            view_mat.invertInPlace()
+            
+            # Projection Matrix
+            proj_mat = sun_lens.getProjectionMat()
+            
+            # Bias Matrix (Map [-1, 1] to [0, 1])
+            bias_mat = LMatrix4f(
+                0.5, 0.0, 0.0, 0.0,
+                0.0, 0.5, 0.0, 0.0,
+                0.0, 0.0, 0.5, 0.0,
+                0.5, 0.5, 0.5, 1.0
+            )
+            
+            # MVP = View * Proj * Bias
+            # Panda matrices are Row-Major, so we multiply in order: v * View * Proj * Bias
+            mvp = view_mat * proj_mat * bias_mat
+            
+            sg.setShaderInput("u_light_mvp", mvp)
+            use_shadows = True
+            
+        sg.setShaderInput("u_use_shadows", 1 if use_shadows else 0)

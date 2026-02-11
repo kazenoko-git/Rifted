@@ -17,7 +17,7 @@ from aurora_engine.camera.camera import Camera
 from aurora_engine.camera.free_fly import FreeFlyController
 from aurora_engine.core.logging import get_logger
 from aurora_engine.utils.math import quaternion_from_euler
-from panda3d.core import Shader as PandaShader, loadPrcFileData, Vec4, Vec3, Quat, LMatrix4f, CullFaceAttrib, NodePath
+from panda3d.core import Shader as PandaShader, loadPrcFileData, Vec4, Vec3, Quat, LMatrix4f, CullFaceAttrib, NodePath, DepthTestAttrib, StencilAttrib, RenderState, ColorWriteAttrib
 
 logger = get_logger()
 
@@ -151,6 +151,10 @@ class LightingTest(Application):
         
         # We want vector TO light, so negate
         self.sun_direction = Vec3(-dir_x, -dir_y, -dir_z)
+        
+        # Force update shader input immediately
+        if hasattr(self, 'renderer') and self.renderer.backend.scene_graph:
+            self.renderer.backend.scene_graph.setShaderInput("u_sun_direction", self.sun_direction)
 
     def _apply_outlines(self):
         """Apply outline shells to character meshes (non-world)."""
@@ -161,27 +165,83 @@ class LightingTest(Application):
 
     def _apply_outline_task(self, task):
         for entity in self.scene_entities:
-            if hasattr(entity, '_shader_applied') and entity._shader_applied:
-                continue
-
             mesh_renderer = entity.get_component(MeshRenderer)
             if mesh_renderer and mesh_renderer._node_path:
                 np = mesh_renderer._node_path
                 
                 # Apply Outline (Inverted Hull) only to characters
                 if hasattr(entity, 'tag') and entity.tag == "character":
-                    old_outline = np.find("outline_shell")
+                    # --- 1. Setup Stencil on the Main Object ---
+                    # We want the main object to WRITE a reference value (e.g., 1) to the stencil buffer.
+                    # This marks the pixels occupied by the object.
+                    
+                    # Create a StencilAttrib
+                    # stencil_op: (stencil_fail, stencil_pass_z_fail, stencil_pass_z_pass)
+                    # We want to replace the stencil value with our reference (1) when the depth test passes.
+                    stencil_attrib = StencilAttrib.make(
+                        1,                          # enabled
+                        StencilAttrib.SCFAlways,    # comparison function (always pass)
+                        StencilAttrib.SOKeep,       # stencil fail op
+                        StencilAttrib.SOKeep,       # z fail op
+                        StencilAttrib.SOReplace,    # z pass op (write ref value)
+                        1,                          # reference value
+                        0xFF,                       # read mask
+                        0xFF                        # write mask
+                    )
+                    np.setAttrib(stencil_attrib)
+                    
+                    # --- 2. Create the Outline Shell ---
+                    outline_name = f"outline_shell_{entity.id}"
+                    old_outline = np.getParent().find(f"**/{outline_name}")
                     if not old_outline.isEmpty():
                         old_outline.removeNode()
                         
-                    outline = np.copyTo(np)
-                    outline.setName("outline_shell")
-                    outline.clearTransform()
+                    outline = np.copyTo(np.getParent())
+                    outline.setName(outline_name)
+                    outline.setMat(np.getMat(np.getParent()))
                     
                     outline.setShader(self.outline_shader)
-                    outline.setShaderInput("u_outline_width", 0.05)
-                    outline.setShaderInput("u_outline_color", Vec4(0, 0, 0, 1))
+                    # Increased outline width as requested (0.03 -> 0.06)
+                    outline.setShaderInput("u_outline_width", 0.06)
+                    outline.setShaderInput("u_outline_color", Vec4(0.02, 0.02, 0.03, 1))
+                    
+                    # --- 3. Configure Outline Rendering ---
+                    
+                    # A. Inverted Hull: Cull Front Faces
+                    # This means we only see the back faces of the expanded shell.
                     outline.setAttrib(CullFaceAttrib.make(CullFaceAttrib.MCullCounterClockwise))
+                    
+                    # B. Stencil Masking: Only draw where Stencil != 1
+                    # This prevents the outline from drawing ON TOP of the object's faces.
+                    # It effectively "cuts out" the object from the outline.
+                    outline_stencil = StencilAttrib.make(
+                        1,                          # enabled
+                        StencilAttrib.SCFNotEqual,  # comparison function (pass if stencil != ref)
+                        StencilAttrib.SOKeep,       # stencil fail op
+                        StencilAttrib.SOKeep,       # z fail op
+                        StencilAttrib.SOKeep,       # z pass op
+                        1,                          # reference value (same as object)
+                        0xFF,                       # read mask
+                        0x00                        # write mask (don't write)
+                    )
+                    outline.setAttrib(outline_stencil)
+                    
+                    # C. Depth Settings
+                    # We want the outline to be depth tested against the world, but we don't necessarily
+                    # need it to write to depth (optional, but safer to turn off for outlines).
+                    # Crucially, since we use stencil to mask the object, we don't need to worry about
+                    # depth fighting with the object itself as much.
+                    outline.setDepthWrite(False)
+                    outline.setDepthTest(True)
+                    
+                    # D. Render Order
+                    # Draw outline AFTER the object so the stencil buffer is populated.
+                    outline.setBin("fixed", 40)
+                    
+                    # Disable lighting on the outline itself (it's a solid color)
+                    outline.setLightOff(1)
+
+                    outline.setTwoSided(False)
                 
         return task.done
 
@@ -214,16 +274,9 @@ class LightingTest(Application):
 
         # Rotate Sun
         if self.input.is_key_down('l'):
-            t = self.time.get_time()
             # Rotate Yaw
             self.sun_yaw += dt * 20.0
             self._update_sun_rotation()
-            
-            # Update Uniforms on all objects
-            for entity in self.scene_entities:
-                mesh_renderer = entity.get_component(MeshRenderer)
-                if mesh_renderer and hasattr(mesh_renderer, '_node_path') and mesh_renderer._node_path:
-                    mesh_renderer._node_path.setShaderInput("u_sun_direction", self.sun_direction)
 
         # Toggle mouse lock
         if self.input.is_key_down('escape'):

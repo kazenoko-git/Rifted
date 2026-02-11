@@ -39,11 +39,16 @@ out vec4 fragColor;
 
 // --- Shadow Calculation (PCF) ---
 float calculate_shadow_factor() {
+    if (v_shadow_pos.w <= 0.0) {
+        return 1.0;
+    }
 
     vec3 shadow_coord = v_shadow_pos.xyz / v_shadow_pos.w;
     shadow_coord = shadow_coord * 0.5 + 0.5;
     
-    if (shadow_coord.z > 1.0) {
+    if (shadow_coord.x < 0.0 || shadow_coord.x > 1.0 ||
+        shadow_coord.y < 0.0 || shadow_coord.y > 1.0 ||
+        shadow_coord.z > 1.0) {
         return 1.0;
     }
     
@@ -69,11 +74,11 @@ void main() {
 
     // --- 1. Get Material & Lighting Properties ---
     vec3 N = normalize(v_world_normal);
-    vec3 L = normalize(u_sun_direction);
+    vec3 L = (length(u_sun_direction) > 0.0001) ? normalize(u_sun_direction) : normalize(vec3(0.3, 0.4, 0.85));
     
     vec3 base_color = u_object_color.rgb;
     // For an ambient light, its contribution is stored in its 'color' property
-    vec3 ambient_light = u_ambient_color.rgb; 
+    vec3 ambient_light = max(u_ambient_color.rgb, vec3(0.16));
     vec3 directional_light_color = u_sun_color.rgb;
 
     // --- 2. Calculate Lighting (Half-Lambert) ---
@@ -83,9 +88,12 @@ void main() {
 
     // --- 3. Calculate Shadows ---
     float shadow_factor = calculate_shadow_factor();
+    // Keep stylized terrain readable even in deep shadow.
+    float softened_shadow = mix(0.65, 1.0, shadow_factor);
 
     // --- 4. Combine Lighting and Shadows ---
-    vec3 final_lighting = ambient_light + (diffuse_intensity * directional_light_color * shadow_factor);
+    vec3 final_lighting = ambient_light + (diffuse_intensity * directional_light_color * softened_shadow);
+    final_lighting = max(final_lighting, vec3(0.12));
     
     vec3 final_color = base_color * final_lighting;
 

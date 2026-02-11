@@ -41,6 +41,7 @@ class PandaBackend:
             window-title {self.config.get('title', 'Aurora Engine')}
             framebuffer-multisample 1
             multisamples 2
+            framebuffer-stencil 1
             gl-coordinate-system default
             gl-version 3 2
             
