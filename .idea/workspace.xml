@@ -5,13 +5,7 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="9e04578e-415c-46e3-a098-24f63f0dcfad" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/shaders/toon_shadow.frag" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/shaders/toon_shadow.vert" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/aurora_engine/rendering/renderer.py" beforeDir="false" afterPath="$PROJECT_DIR$/aurora_engine/rendering/renderer.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/game/examples/lighting_test.py" beforeDir="false" afterPath="$PROJECT_DIR$/game/examples/lighting_test.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/shaders/world.frag" beforeDir="false" afterPath="$PROJECT_DIR$/shaders/world.frag" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/shaders/world.vert" beforeDir="false" afterPath="$PROJECT_DIR$/shaders/world.vert" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -30,17 +24,17 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent"><![CDATA[{
-  "keyToString": {
-    "ModuleVcsDetector.initialDetectionPerformed": "true",
-    "Python.lighting_test.executor": "Run",
-    "RunOnceActivity.ShowReadmeOnStart": "true",
-    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager": "true",
-    "RunOnceActivity.git.unshallow": "true",
-    "git-widget-placeholder": "main",
-    "settings.editor.selected.configurable": "configurable.group.build"
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
+    &quot;Python.lighting_test.executor&quot;: &quot;Run&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;main&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;configurable.group.build&quot;
   }
-}]]></component>
+}</component>
   <component name="SharedIndexes">
     <attachedChunks>
       <set>
@@ -57,5 +51,16 @@
       <updated>1770815726877</updated>
     </task>
     <servers />
+  </component>
+  <component name="Vcs.Log.Tabs.Properties">
+    <option name="TAB_STATES">
+      <map>
+        <entry key="MAIN">
+          <value>
+            <State />
+          </value>
+        </entry>
+      </map>
+    </option>
   </component>
 </project>
