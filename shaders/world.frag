@@ -3,7 +3,7 @@
  * WORLD SHADER (Cook-Torrance PBR)
  * - Uses glTF-style inputs when available (albedo in p3d_Texture0, metallic/roughness in p3d_Texture1 G/B, normal map in p3d_Texture2, AO in p3d_Texture3).
  * - Falls back gracefully to flat color uniforms.
- * - Shadowing driven by LightSystem (u_light_mvp + p3d_LightShadowMap0).
+ * - Shadowing uses Panda directional-light shadow matrix/sampler.
  */
 
 // Inputs from vertex shader
@@ -13,7 +13,7 @@ in vec2 v_uv;
 in vec4 v_shadow_pos;
 
 // Camera
-uniform vec3 p3d_CameraPosition;
+uniform vec3 u_camera_pos;
 
 // Textures (optional, safe to leave unbound)
 uniform sampler2D p3d_Texture0;        // Albedo
@@ -21,7 +21,21 @@ uniform sampler2D p3d_Texture1;        // Metallic (B) / Roughness (G)
 uniform sampler2D p3d_Texture2;        // Reserved for future normal-map support
 uniform sampler2D p3d_Texture3;        // AO
 uniform sampler2D p3d_Texture4;        // Emissive
-uniform sampler2DShadow p3d_LightShadowMap0;
+struct p3d_LightSourceParameters {
+    vec4 color;
+    vec4 ambient;
+    vec4 diffuse;
+    vec4 specular;
+    vec4 position;
+    vec3 spotDirection;
+    float spotExponent;
+    float spotCutoff;
+    float spotCosCutoff;
+    vec3 attenuation;
+    sampler2DShadow shadowMap;
+    mat4 shadowMatrix;
+};
+uniform p3d_LightSourceParameters p3d_LightSource[1];
 
 // Scene inputs
 uniform vec4 u_object_color;    // Base color multiplier
@@ -38,7 +52,7 @@ uniform float u_normal_scale  = 1.0;
 uniform vec3  u_emissive_color = vec3(0.0);
 uniform float u_emissive_strength = 0.0;
 
-out vec4 fragColor;
+out vec4 p3d_FragColor;
 
 const float PI = 3.14159265359;
 
@@ -69,22 +83,26 @@ vec3 FresnelSchlick(float cosTheta, vec3 F0) {
 
 // --- Shadow sampling (3x3 PCF) ---
 float shadow_factor(vec3 N, vec3 L) {
-    if (u_use_shadows == 0 || v_shadow_pos.w <= 0.0) return 1.0;
+    // If shadow map isn't bound, sampler2DShadow returns 1, so we can skip the explicit u_use_shadows guard.
+    if (v_shadow_pos.w <= 0.0) return 1.0;
 
+    // shadowMatrix already includes bias to [0,1] for sampler2DShadow
     vec3 proj = v_shadow_pos.xyz / v_shadow_pos.w;
-    if (proj.x < 0.0 || proj.x > 1.0 || proj.y < 0.0 || proj.y > 1.0 || proj.z < 0.0 || proj.z > 1.0) {
+
+    if (proj.x < 0.0 || proj.x > 1.0 || proj.y < 0.0 || proj.y > 1.0 || proj.z > 1.0) {
         return 1.0;
     }
 
-    float bias = max(0.0005, 0.002 * (1.0 - dot(N, L)));
+    float bias = max(0.001 * (1.0 - dot(N, L)), 0.0002);
+    vec2 texel = 1.0 / textureSize(p3d_LightSource[0].shadowMap, 0);
+
     float shadow = 0.0;
-    float texel_offset = 1.0 / 2048.0;
     for (int x = -1; x <= 1; ++x) {
         for (int y = -1; y <= 1; ++y) {
-            vec4 sample_coord = v_shadow_pos;
-            sample_coord.xy += vec2(x, y) * texel_offset * v_shadow_pos.w;
-            sample_coord.z -= bias * v_shadow_pos.w;
-            shadow += textureProj(p3d_LightShadowMap0, sample_coord);
+            shadow += texture(
+                p3d_LightSource[0].shadowMap,
+                vec3(proj.xy + vec2(x, y) * texel, proj.z - bias)
+            );
         }
     }
     return shadow / 9.0;
@@ -98,13 +116,18 @@ void main() {
 
     vec3 mr_sample = texture(p3d_Texture1, v_uv).rgb;
     float metallic = clamp(mr_sample.b + u_metallic, 0.0, 1.0);
-    float roughness = clamp(mr_sample.g + u_roughness, 0.05, 1.0);
-    float ao = clamp(texture(p3d_Texture3, v_uv).r * u_ao, 0.0, 1.0);
+    float roughness = (mr_sample.g > 0.001) ? clamp(mr_sample.g, 0.05, 1.0) : clamp(u_roughness, 0.05, 1.0);
+
+    float ao_sample = texture(p3d_Texture3, v_uv).r;
+    if (ao_sample <= 0.001) {
+        ao_sample = 1.0;
+    }
+    float ao = clamp(ao_sample * u_ao, 0.0, 1.0);
 
     vec3 emissive = texture(p3d_Texture4, v_uv).rgb * u_emissive_color * u_emissive_strength;
 
     vec3 N = normalize(v_world_normal);
-    vec3 V = normalize(p3d_CameraPosition - v_world_pos);
+    vec3 V = normalize(u_camera_pos - v_world_pos);
     vec3 L = (length(u_sun_direction) > 0.0001) ? normalize(u_sun_direction) : vec3(0.0, 1.0, 0.0);
     vec3 H = normalize(V + L);
 
@@ -130,7 +153,7 @@ void main() {
 
     vec3 Lo = (kD * albedo / PI + specular) * radiance * NdotL * shadow;
 
-    vec3 ambient = u_ambient_color.rgb * albedo * ao;
+    vec3 ambient = max(u_ambient_color.rgb, vec3(0.08)) * albedo * ao;
 
     vec3 color = ambient + Lo + emissive;
 
@@ -145,5 +168,5 @@ void main() {
     // Gamma
     color = pow(color, vec3(1.0 / 2.2));
 
-    fragColor = vec4(color, u_object_color.a);
+    p3d_FragColor = vec4(color, u_object_color.a);
 }

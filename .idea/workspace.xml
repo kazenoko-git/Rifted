@@ -4,7 +4,15 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="9e04578e-415c-46e3-a098-24f63f0dcfad" name="Changes" comment="" />
+    <list default="true" id="9e04578e-415c-46e3-a098-24f63f0dcfad" name="Changes" comment="">
+      <change afterPath="$PROJECT_DIR$/shaders/toon_shadow.frag" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/shaders/toon_shadow.vert" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/aurora_engine/rendering/renderer.py" beforeDir="false" afterPath="$PROJECT_DIR$/aurora_engine/rendering/renderer.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/game/examples/lighting_test.py" beforeDir="false" afterPath="$PROJECT_DIR$/game/examples/lighting_test.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/shaders/world.frag" beforeDir="false" afterPath="$PROJECT_DIR$/shaders/world.frag" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/shaders/world.vert" beforeDir="false" afterPath="$PROJECT_DIR$/shaders/world.vert" afterDir="false" />
+    </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />

@@ -8,7 +8,22 @@ in vec2 p3d_MultiTexCoord0;
 // Matrices
 uniform mat4 p3d_ModelMatrix;
 uniform mat4 p3d_ModelViewProjectionMatrix;
-uniform mat4 u_light_mvp; // Light view-projection with bias applied by LightSystem
+uniform mat4 u_light_mvp; // World -> Light clip (bias included), provided by LightSystem
+struct p3d_LightSourceParameters {
+    vec4 color;
+    vec4 ambient;
+    vec4 diffuse;
+    vec4 specular;
+    vec4 position;
+    vec3 spotDirection;
+    float spotExponent;
+    float spotCutoff;
+    float spotCosCutoff;
+    vec3 attenuation;
+    sampler2DShadow shadowMap;
+    mat4 shadowMatrix;
+};
+uniform p3d_LightSourceParameters p3d_LightSource[1];
 
 // Varyings
 out vec3 v_world_pos;
@@ -26,8 +41,11 @@ void main() {
 
     v_uv = p3d_MultiTexCoord0;
 
-    // Light clip coords (already biased to 0..1 in LightSystem)
-    v_shadow_pos = u_light_mvp * world_pos;
+    // Prefer engine-provided light MVP (bias included) to avoid driver differences.
+    // Fallback to Panda's built-in shadowMatrix if needed.
+    vec4 sc_a = u_light_mvp * world_pos;
+    vec4 sc_b = p3d_LightSource[0].shadowMatrix * world_pos;
+    v_shadow_pos = (abs(sc_a.w) > 0.00001) ? sc_a : sc_b;
 
     gl_Position = p3d_ModelViewProjectionMatrix * p3d_Vertex;
 }

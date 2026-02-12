@@ -35,6 +35,8 @@ class Renderer:
         # Default shaders (toon + world)
         self._shader_world = None
         self._shader_toon = None
+        # Allow forcing the built-in world shader even if complexpbr is installed
+        self.force_builtin_world_shader = False
         
         self.logger.info("Renderer initialized")
 
@@ -77,23 +79,17 @@ class Renderer:
             self.logger.error(f"Failed to load toon shader: {e}")
             self._shader_toon = None
 
-        # Only load custom world shader if complexpbr is NOT available
-        # If complexpbr is available, we will use it instead
+        # Always load the built-in world shader; whether we use it is decided later.
         try:
-            import complexpbr
-            self.logger.info("Using complexpbr for world shaders")
-            self._shader_world = None # Don't load custom shader
-        except ImportError:
-            try:
-                self._shader_world = PandaShader.load(
-                    PandaShader.SL_GLSL,
-                    vertex=os.path.join(shader_dir, "world.vert"),
-                    fragment=os.path.join(shader_dir, "world.frag"),
-                )
-                self.logger.info("Loaded world shader")
-            except Exception as e:
-                self.logger.error(f"Failed to load world shader: {e}")
-                self._shader_world = None
+            self._shader_world = PandaShader.load(
+                PandaShader.SL_GLSL,
+                vertex=os.path.join(shader_dir, "world.vert"),
+                fragment=os.path.join(shader_dir, "world.frag"),
+            )
+            self.logger.info("Loaded world shader")
+        except Exception as e:
+            self.logger.error(f"Failed to load world shader: {e}")
+            self._shader_world = None
 
     def register_camera(self, camera: Camera):
         """Register a camera for rendering."""
@@ -120,6 +116,8 @@ class Renderer:
             rot = cam_transform.get_world_rotation()
             
             self.backend.update_camera_transform(pos, rot)
+            # Shared camera position for custom shaders (world/toon/etc.)
+            self.backend.scene_graph.setShaderInput("u_camera_pos", Point3(pos[0], pos[1], pos[2]))
 
             # Set camera matrices
             view_matrix = self.main_camera.get_view_matrix()
@@ -262,17 +260,20 @@ class Renderer:
                 if mesh_renderer.shading_model == "character":
                     desired_shader = self._shader_toon
                 elif mesh_renderer.shading_model == "world":
-                    # If complexpbr is available, we use it instead of a custom shader
-                    try:
-                        import complexpbr
-                        # complexpbr.apply_shader(np) applies the shader to the node
-                        # We only want to do this once or if the shader changes
+                    use_complexpbr = False
+                    if not self.force_builtin_world_shader:
+                        try:
+                            import complexpbr
+                            use_complexpbr = True
+                        except ImportError:
+                            use_complexpbr = False
+
+                    if use_complexpbr:
                         if mesh_renderer._applied_shader != "complexpbr":
                             complexpbr.apply_shader(np)
                             mesh_renderer._applied_shader = "complexpbr"
                             # complexpbr handles shadows automatically if configured
-                    except ImportError:
-                        # Fallback to custom world shader
+                    else:
                         desired_shader = self._shader_world
                         if desired_shader and mesh_renderer._applied_shader is not desired_shader:
                             np.setShader(desired_shader)

@@ -31,6 +31,11 @@ class LightingTest(Application):
 
     def initialize_game(self):
         logger.info("Initializing Toon Lighting Test...")
+
+        # Use the new GLSL 330 toon + shadow shader created for this example.
+        self._load_toon_shadow_shader()
+        # Force built-in world shader (Cook-Torrance + shadow) even if complexpbr is installed.
+        self._force_world_shadow_shader()
         
         # 1. Setup Camera
         self.camera = Camera()
@@ -51,10 +56,41 @@ class LightingTest(Application):
 
         # 6. Input state for single-press toggle
         self._v_key_pressed = False
+        self._l_key_pressed = False
         
         logger.info("Lighting Test Initialized.")
         logger.info("Controls: WASD to Move, Hold Right Click + Mouse to Look.")
         logger.info("Debug: 'V' to toggle Shadow Map View, 'L' to rotate Sun.")
+
+    def _load_toon_shadow_shader(self):
+        """Override the default toon shader with the new shadow-aware variant."""
+        shader_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../shaders"))
+        try:
+            toon_shadow = PandaShader.load(
+                PandaShader.SL_GLSL,
+                vertex=os.path.join(shader_dir, "toon_shadow.vert"),
+                fragment=os.path.join(shader_dir, "toon_shadow.frag"),
+            )
+            # Swap renderer's default toon shader so all 'character' meshes use it.
+            self.renderer._shader_toon = toon_shadow
+            logger.info("Loaded toon_shadow shader for lighting test.")
+        except Exception as e:
+            logger.error(f"Failed to load toon_shadow shader: {e}")
+
+    def _force_world_shadow_shader(self):
+        """Ensure world objects use the built-in PBR+shadow shader instead of complexpbr."""
+        shader_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../shaders"))
+        try:
+            world_shader = PandaShader.load(
+                PandaShader.SL_GLSL,
+                vertex=os.path.join(shader_dir, "world.vert"),
+                fragment=os.path.join(shader_dir, "world.frag"),
+            )
+            self.renderer._shader_world = world_shader
+            self.renderer.force_builtin_world_shader = True
+            logger.info("Forced built-in world shader with shadows for lighting test.")
+        except Exception as e:
+            logger.error(f"Failed to load world shader: {e}")
 
     def _load_outline_shader(self):
         """Load the outline shader for inverted hull rendering."""
@@ -279,11 +315,17 @@ class LightingTest(Application):
         else:
             self._v_key_pressed = False
 
-        # Rotate Sun
-        if self.input.is_key_down('l'):
-            # Rotate Yaw
+        # Rotate Sun (supports hold and single-press nudge)
+        if self.input.is_key_down('l') or self.input.is_key_down('L'):
+            # Hold to rotate continuously
             self.sun_yaw += dt * 20.0
             self._update_sun_rotation()
+            self._l_key_pressed = True
+        else:
+            if getattr(self, "_l_key_pressed", False):
+                # On release, do nothing extra—edge detection handled here
+                pass
+            self._l_key_pressed = False
 
         # Toggle mouse lock
         if self.input.is_key_down('escape'):
