@@ -6,17 +6,7 @@
   <component name="ChangeListManager">
     <list default="true" id="9e04578e-415c-46e3-a098-24f63f0dcfad" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/aurora_engine/rendering/light_system.py" beforeDir="false" afterPath="$PROJECT_DIR$/aurora_engine/rendering/light_system.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/aurora_engine/rendering/panda_backend.py" beforeDir="false" afterPath="$PROJECT_DIR$/aurora_engine/rendering/panda_backend.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/aurora_engine/rendering/renderer.py" beforeDir="false" afterPath="$PROJECT_DIR$/aurora_engine/rendering/renderer.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/game/eternae.db" beforeDir="false" afterPath="$PROJECT_DIR$/game/eternae.db" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/game/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/game/main.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/game/systems/day_night_cycle.py" beforeDir="false" afterPath="$PROJECT_DIR$/game/systems/day_night_cycle.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/shaders/character_toon.frag" beforeDir="false" afterPath="$PROJECT_DIR$/shaders/character_toon.frag" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/shaders/character_toon.vert" beforeDir="false" afterPath="$PROJECT_DIR$/shaders/character_toon.vert" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/shaders/lighting.glsl" beforeDir="false" afterPath="$PROJECT_DIR$/shaders/lighting.glsl" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/shaders/world_pbr.frag" beforeDir="false" afterPath="$PROJECT_DIR$/shaders/world_pbr.frag" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/shaders/world_pbr.vert" beforeDir="false" afterPath="$PROJECT_DIR$/shaders/world_pbr.vert" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
