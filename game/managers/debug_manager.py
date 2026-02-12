@@ -110,7 +110,9 @@ class DebugManager:
             
         # Time Controls
         day_night = self._get_day_night_system()
-        if day_night:
+        # Require Shift modifier for time controls to avoid accidental pause.
+        shift_down = self.input.is_key_down('lshift') or self.input.is_key_down('rshift')
+        if day_night and shift_down:
             # [: Time - 0.1
             if self.input.is_key_down('['):
                 if not self.bracket_left_pressed:
@@ -137,6 +139,10 @@ class DebugManager:
                     logger.info(f"Time Paused: {day_night.paused}")
             else:
                 self.p_pressed = False
+        else:
+            self.bracket_left_pressed = False
+            self.bracket_right_pressed = False
+            self.p_pressed = False
 
     def _toggle_debug_view(self):
         """Toggle visual debug modes."""
@@ -197,6 +203,10 @@ class DebugManager:
                 if light:
                     c = light.color
                     info += f"Sun: ({c[0]:.2f}, {c[1]:.2f}, {c[2]:.2f}) Int: {light.intensity:.2f}\n"
+                    t = day_night.sun_entity.get_component(Transform)
+                    if t:
+                        f = t.forward
+                        info += f"SunDir(Fwd): ({f[0]:.2f}, {f[1]:.2f}, {f[2]:.2f})\n"
             
             if day_night.moon_entity:
                 light = day_night.moon_entity.get_component(DirectionalLight)

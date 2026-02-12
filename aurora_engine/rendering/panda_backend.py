@@ -35,7 +35,7 @@ class PandaBackend:
 
         # Load config
         # AGGRESSIVE MEMORY OPTIMIZATION
-        # Added gl-version 3 2 to force Core Profile on macOS for GLSL 1.50+ support
+        # Request OpenGL 3.3 Core for GLSL 330 shaders in the unified forward pipeline.
         load_prc_file_data("", f"""
             win-size {self.config.get('width', 1920)} {self.config.get('height', 1080)}
             window-title {self.config.get('title', 'Aurora Engine')}
@@ -44,7 +44,7 @@ class PandaBackend:
             framebuffer-stencil 1
             framebuffer-srgb 1
             gl-coordinate-system default
-            gl-version 3 2
+            gl-version 3 3
             
             # --- Memory Optimization ---
             # Cache models to disk to avoid reprocessing

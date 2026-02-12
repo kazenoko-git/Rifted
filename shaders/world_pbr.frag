@@ -6,8 +6,10 @@
 in vec3 v_worldPos;
 in vec3 v_worldNormal;
 in vec2 v_uv;
+in vec4 v_color;
 in vec4 v_shadowCoord;
 
+uniform sampler2D p3d_Texture0;
 uniform sampler2D u_albedoMap;
 uniform sampler2D u_normalMap;
 uniform sampler2D u_roughnessMap;
@@ -16,6 +18,7 @@ uniform vec4 u_baseColor;
 uniform vec3 u_ambientColor;
 uniform vec3 u_cameraWorldPos;
 uniform float u_roughnessScale;
+uniform float u_useVertexColor;
 
 out vec4 p3d_FragColor;
 
@@ -44,7 +47,15 @@ vec3 sampleWorldNormal() {
 }
 
 void main() {
-    vec3 albedo = texture(u_albedoMap, v_uv).rgb * u_baseColor.rgb;
+    vec3 albedoTex = texture(p3d_Texture0, v_uv).rgb;
+    if (length(albedoTex) < 0.001) {
+        albedoTex = texture(u_albedoMap, v_uv).rgb;
+    }
+    vec3 vertexColor = mix(vec3(1.0), v_color.rgb, clamp(u_useVertexColor, 0.0, 1.0));
+    vec3 albedo = albedoTex * u_baseColor.rgb * vertexColor;
+    if (length(albedo) < 0.01) {
+        albedo = max(u_baseColor.rgb, vec3(0.20));
+    }
     float roughness = clamp(texture(u_roughnessMap, v_uv).r * u_roughnessScale, 0.04, 1.0);
 
     vec3 normalWS = sampleWorldNormal();
@@ -59,7 +70,7 @@ void main() {
     // Requirement: apply shadow factor before final color output.
     directLighting *= shadowFactor;
 
-    vec3 ambientLighting = albedo * u_ambientColor;
+    vec3 ambientLighting = albedo * max(u_ambientColor, vec3(0.08));
     vec3 finalColor = ambientLighting + directLighting;
     p3d_FragColor = vec4(finalColor, u_baseColor.a);
 }

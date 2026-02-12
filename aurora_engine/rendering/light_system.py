@@ -9,7 +9,7 @@ from aurora_engine.core.logging import get_logger
 from panda3d.core import AmbientLight as PandaAmbientLight
 from panda3d.core import DirectionalLight as PandaDirectionalLight
 from panda3d.core import PointLight as PandaPointLight
-from panda3d.core import Vec4, Vec3, NodePath, BitMask32, LMatrix4f
+from panda3d.core import Vec4, Vec3, NodePath, BitMask32, LMatrix4f, Quat
 
 logger = get_logger()
 
@@ -168,29 +168,22 @@ class LightSystem(System):
 
     def _get_directional_light_vector(self, entity, light: DirectionalLight) -> Vec3:
         """Return world-space vector pointing TO the light (for shaders)."""
+        # Prefer ECS transform rotation so day/night updates always drive shader light direction,
+        # even if backend light node state is delayed or stale.
+        transform = entity.get_component(Transform)
+        if transform:
+            rot = transform.get_world_rotation()
+            q = Quat(rot[3], rot[0], rot[1], rot[2])
+            forward = q.xform(Vec3(0, 1, 0))
+            if forward.length() > 0.0001:
+                forward.normalize()
+            return -forward
+
         if light._backend_handle:
-            # Panda forward is +Y, light direction is forward; we want vector TO light => -forward
-            # Wait, if we want vector TO light, it is the opposite of the light direction.
-            # Light direction is usually -Z in local space if looking down.
-            # But Panda DirectionalLight shines along +Y axis of the node.
-            # So the light direction vector is +Y transformed to world.
-            # We want vector TO light, so it is -Y transformed to world?
-            # No, if light shines along +Y, then vector TO light is -Y.
-            
-            # Let's check how we set up the sun.
-            # In lighting_test.py:
-            # dir_x = -math.sin(y) * math.cos(p) ...
-            # self.sun_direction = Vec3(-dir_x, -dir_y, -dir_z)
-            # This manual calculation seems to be "To Light".
-            
-            # Here we extract it from the node.
-            # The node's forward vector (Y+) is the direction the light is pointing.
+            # The node's local +Y transformed to world.
             forward = light._backend_handle.getQuat().xform(Vec3(0, 1, 0))
             if forward.length() > 0.0001:
                 forward.normalize()
-            
-            # We want vector TO light source.
-            # If light shines along Forward, then source is behind.
             return -forward
 
         return Vec3(0.0, 1.0, -1.0)
@@ -199,10 +192,31 @@ class LightSystem(System):
         """Apply shared lighting inputs to the scene graph so all shaders see them."""
         if not hasattr(self.renderer.backend, 'scene_graph'):
             return
+
+        # Safety floors to prevent accidental all-black output.
+        if ambient_color.length() < 0.01:
+            ambient_color = Vec3(0.22, 0.22, 0.26)
+        if directional_color.length() < 0.01:
+            directional_color = Vec3(0.85, 0.85, 0.80)
+        if sun_dir.length() < 0.001:
+            sun_dir = Vec3(-0.4, -0.4, 0.8)
+        else:
+            sun_dir.normalize()
+
         sg = self.renderer.backend.scene_graph
+
+        # Legacy names used by older shaders still in the repo.
         sg.setShaderInput("u_ambient_color", Vec4(ambient_color[0], ambient_color[1], ambient_color[2], 1.0))
         sg.setShaderInput("u_sun_color", Vec4(directional_color[0], directional_color[1], directional_color[2], 1.0))
         sg.setShaderInput("u_sun_direction", sun_dir)
+
+        # Unified forward pipeline names (world_pbr + character_toon).
+        sg.setShaderInput("u_ambientColor", Vec3(ambient_color[0], ambient_color[1], ambient_color[2]))
+        sg.setShaderInput("u_lightDirection", sun_dir)
+        sg.setShaderInput("u_lightColor", Vec3(directional_color[0], directional_color[1], directional_color[2]))
+        sg.setShaderInput("u_shadowBias", 0.0015)
+        sg.setShaderInput("u_shadowPcfRadius", 1.0)
+
         # Default PBR parameters for world shader (can be overridden per-object)
         sg.setShaderInput("u_metallic", 0.0)
         sg.setShaderInput("u_roughness", 0.8)

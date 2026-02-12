@@ -9,8 +9,22 @@ from aurora_engine.scene.transform import Transform
 from aurora_engine.rendering.mesh import MeshRenderer, Mesh
 from aurora_engine.core.logging import get_logger
 from aurora_engine.utils.profiler import profile_section
-from panda3d.core import Vec4, BillboardEffect, Filename, getModelPath, Point3, NodePath, Material, TransparencyAttrib, Shader as PandaShader
+from panda3d.core import (
+    Vec3,
+    Vec4,
+    BillboardEffect,
+    Filename,
+    getModelPath,
+    Point3,
+    NodePath,
+    Material,
+    TransparencyAttrib,
+    Shader as PandaShader,
+    Texture,
+    PNMImage,
+)
 import os
+import re
 
 class Renderer:
     """
@@ -37,6 +51,10 @@ class Renderer:
         self._shader_toon = None
         # Allow forcing the built-in world shader even if complexpbr is installed
         self.force_builtin_world_shader = False
+        # Default textures for the unified forward shader set.
+        self._default_albedo_tex = None
+        self._default_normal_tex = None
+        self._default_roughness_tex = None
         
         self.logger.info("Renderer initialized")
 
@@ -49,6 +67,7 @@ class Renderer:
         # Calling it would conflict with simplepbr's PBR shader.
 
         self._load_default_shaders()
+        self._setup_default_unified_shader_inputs()
         self._setup_cel_shading_pipeline()
         
         # Initialize complexpbr screenspace effects if available
@@ -64,32 +83,105 @@ class Renderer:
         from aurora_engine.rendering.post_process import OutlineEffect, BloomEffect
         pass
 
+    def _read_shader_source_with_includes(self, shader_path: str, visited=None) -> str:
+        """Load GLSL text and expand `#pragma include \"file\"` directives recursively."""
+        if visited is None:
+            visited = set()
+
+        normalized = os.path.abspath(shader_path)
+        if normalized in visited:
+            raise RuntimeError(f"Cyclic shader include detected: {normalized}")
+        visited.add(normalized)
+
+        with open(normalized, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+
+        include_re = re.compile(r'^\s*#pragma\s+include\s+"([^"]+)"\s*$')
+        out = []
+        base_dir = os.path.dirname(normalized)
+
+        for line in lines:
+            m = include_re.match(line)
+            if not m:
+                out.append(line)
+                continue
+
+            include_name = m.group(1)
+            include_path = os.path.join(base_dir, include_name)
+            include_src = self._read_shader_source_with_includes(include_path, visited)
+            out.append(f"\n// --- begin include: {include_name} ---\n")
+            out.append(include_src)
+            out.append(f"\n// --- end include: {include_name} ---\n")
+
+        visited.remove(normalized)
+        return "".join(out)
+
+    def _load_glsl_shader_with_includes(self, vertex_path: str, fragment_path: str):
+        """Compile GLSL shader after expanding local include directives."""
+        try:
+            vertex_src = self._read_shader_source_with_includes(vertex_path)
+            fragment_src = self._read_shader_source_with_includes(fragment_path)
+            return PandaShader.make(PandaShader.SL_GLSL, vertex_src, fragment_src)
+        except Exception as e:
+            self.logger.error(f"Shader compile failed ({vertex_path}, {fragment_path}): {e}")
+            return None
+
     def _load_default_shaders(self):
-        """Load built-in toon and world shaders."""
+        """Load unified forward shaders (character toon + world PBR)."""
         shader_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "shaders"))
+        getModelPath().appendDirectory(Filename.fromOsSpecific(shader_dir))
 
-        try:
-            self._shader_toon = PandaShader.load(
-                PandaShader.SL_GLSL,
-                vertex=os.path.join(shader_dir, "toon.vert"),
-                fragment=os.path.join(shader_dir, "toon.frag"),
-            )
-            self.logger.info("Loaded toon shader")
-        except Exception as e:
-            self.logger.error(f"Failed to load toon shader: {e}")
-            self._shader_toon = None
+        toon_vert = os.path.join(shader_dir, "character_toon.vert")
+        toon_frag = os.path.join(shader_dir, "character_toon.frag")
+        world_vert = os.path.join(shader_dir, "world_pbr.vert")
+        world_frag = os.path.join(shader_dir, "world_pbr.frag")
 
-        # Always load the built-in world shader; whether we use it is decided later.
-        try:
-            self._shader_world = PandaShader.load(
-                PandaShader.SL_GLSL,
-                vertex=os.path.join(shader_dir, "world.vert"),
-                fragment=os.path.join(shader_dir, "world.frag"),
-            )
-            self.logger.info("Loaded world shader")
-        except Exception as e:
-            self.logger.error(f"Failed to load world shader: {e}")
-            self._shader_world = None
+        self._shader_toon = self._load_glsl_shader_with_includes(toon_vert, toon_frag)
+        if self._shader_toon:
+            self.logger.info("Loaded character toon shader")
+        else:
+            self.logger.error("Failed to load character toon shader.")
+
+        self._shader_world = self._load_glsl_shader_with_includes(world_vert, world_frag)
+        if self._shader_world:
+            self.logger.info("Loaded world PBR shader")
+        else:
+            self.logger.error("Failed to load world PBR shader.")
+
+    def _create_solid_texture(self, name: str, r: float, g: float, b: float, a: float = 1.0) -> Texture:
+        """Create a 1x1 fallback texture used when assets don't provide maps."""
+        image = PNMImage(1, 1, 4)
+        image.fill(r, g, b)
+        image.alphaFill(a)
+        tex = Texture(name)
+        tex.load(image)
+        return tex
+
+    def _setup_default_unified_shader_inputs(self):
+        """
+        Set shared defaults for unified forward shaders.
+        This prevents black output on meshes without explicit texture maps.
+        """
+        self._default_albedo_tex = self._create_solid_texture("default_albedo", 1.0, 1.0, 1.0)
+        self._default_normal_tex = self._create_solid_texture("default_normal", 0.5, 0.5, 1.0)
+        self._default_roughness_tex = self._create_solid_texture("default_roughness", 0.75, 0.75, 0.75)
+
+        sg = self.backend.scene_graph
+        sg.setShaderInput("u_albedoMap", self._default_albedo_tex)
+        sg.setShaderInput("u_normalMap", self._default_normal_tex)
+        sg.setShaderInput("u_roughnessMap", self._default_roughness_tex)
+
+        # Shared light/material defaults expected by the unified shader set.
+        sg.setShaderInput("u_shadowBias", 0.0015)
+        sg.setShaderInput("u_shadowPcfRadius", 1.0)
+        sg.setShaderInput("u_ambientColor", Vec3(0.2, 0.2, 0.25))
+        sg.setShaderInput("u_lightDirection", Vec3(0.0, 1.0, -1.0))
+        sg.setShaderInput("u_lightColor", Vec3(1.0, 1.0, 1.0))
+        sg.setShaderInput("u_roughnessScale", 1.0)
+        sg.setShaderInput("u_shadowTint", Vec3(0.2, 0.22, 0.28))
+        sg.setShaderInput("u_toonThreshold1", 0.3333)
+        sg.setShaderInput("u_toonThreshold2", 0.6666)
+        sg.setShaderInput("u_useVertexColor", 0.0)
 
     def register_camera(self, camera: Camera):
         """Register a camera for rendering."""
@@ -118,6 +210,7 @@ class Renderer:
             self.backend.update_camera_transform(pos, rot)
             # Shared camera position for custom shaders (world/toon/etc.)
             self.backend.scene_graph.setShaderInput("u_camera_pos", Point3(pos[0], pos[1], pos[2]))
+            self.backend.scene_graph.setShaderInput("u_cameraWorldPos", Point3(pos[0], pos[1], pos[2]))
 
             # Set camera matrices
             view_matrix = self.main_camera.get_view_matrix()
@@ -235,6 +328,7 @@ class Renderer:
                         tex_path = tex_path.replace('\\', '/')
                         tex = self.backend.base.loader.loadTexture(tex_path)
                         mesh_renderer._node_path.setTexture(tex, 1)
+                        mesh_renderer._node_path.setShaderInput("u_albedoMap", tex)
                         mesh_renderer._node_path.setTransparency(TransparencyAttrib.MAlpha)
                     except Exception as e:
                         self.logger.warning(f"Failed to load texture {mesh_renderer.texture_path}: {e}")
@@ -288,12 +382,33 @@ class Renderer:
             if hasattr(mesh_renderer, 'color'):
                 c = mesh_renderer.color
                 np.setShaderInput("u_object_color", Vec4(c[0], c[1], c[2], c[3] if len(c) > 3 else 1.0))
+                np.setShaderInput("u_baseColor", Vec4(c[0], c[1], c[2], c[3] if len(c) > 3 else 1.0))
 
             # Toon-only inputs
             if mesh_renderer.shading_model == "character":
                 np.setShaderInput("u_toon_bands", float(mesh_renderer.toon_bands))
                 sc = mesh_renderer.shadow_color
                 np.setShaderInput("u_shadow_color", Vec4(sc[0], sc[1], sc[2], sc[3] if len(sc) > 3 else 1.0))
+                np.setShaderInput("u_shadowTint", Vec3(sc[0], sc[1], sc[2]))
+                bands = max(float(mesh_renderer.toon_bands), 3.0)
+                np.setShaderInput("u_toonThreshold1", 1.0 / bands)
+                np.setShaderInput("u_toonThreshold2", 2.0 / bands)
+
+            # Unified world shader roughness scale default.
+            if mesh_renderer.shading_model == "world":
+                np.setShaderInput("u_roughnessScale", 1.0)
+
+            # Enable vertex color only for procedural meshes that actually provide it.
+            use_vertex_color = 0.0
+            if mesh_renderer.mesh and mesh_renderer.mesh.colors is not None and len(mesh_renderer.mesh.colors) > 0:
+                use_vertex_color = 1.0
+            np.setShaderInput("u_useVertexColor", use_vertex_color)
+
+            # Fallback maps for unified shaders when an object has no dedicated textures.
+            if not (hasattr(mesh_renderer, 'texture_path') and mesh_renderer.texture_path):
+                np.setShaderInput("u_albedoMap", self._default_albedo_tex)
+            np.setShaderInput("u_normalMap", self._default_normal_tex)
+            np.setShaderInput("u_roughnessMap", self._default_roughness_tex)
             
             # --- Material Fix for Lighting ---
             # Ensure a Panda Material is attached for lighting if none exists

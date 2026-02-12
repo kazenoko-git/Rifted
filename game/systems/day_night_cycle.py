@@ -2,7 +2,6 @@
 
 from aurora_engine.ecs.system import System
 from aurora_engine.scene.transform import Transform
-from aurora_engine.rendering.mesh import MeshRenderer, create_sphere_mesh
 from aurora_engine.rendering.light import DirectionalLight, AmbientLight
 import numpy as np
 import math
@@ -15,67 +14,55 @@ class DayNightCycle(System):
     Manages the day/night cycle, including sun/moon movement and lighting/sky color changes.
     """
 
-    def __init__(self, renderer, day_duration: float = 60.0):
+    def __init__(self, renderer, day_duration: float = 240.0):
         super().__init__()
         self.renderer = renderer
-        self.day_duration = day_duration # Seconds for a full day
-        self.time = 0.0 # 0.0 to 1.0 (0=Noon, 0.5=Midnight)
+        self.day_duration = day_duration  # Seconds for a full day
+        self.time = 0.0  # 0.0 to 1.0 (0 = noon, 0.5 = midnight)
         self.paused = False
         
         self.sun_entity = None
         self.moon_entity = None
         self.ambient_entity = None
         
-        self.target = None # Player transform to follow
-        self.orbit_radius = 500.0 # Distance from player
+        self.target = None  # Player transform to follow
+        self.orbit_radius = 500.0  # Distance from player
         
-        self._setup_lights()
         self._setup_color_gradient()
         
-        # Start at evening to show transition
-        self.time = 0.3 
-        # logger.debug("DayNightCycle initialized")
-
-    def _setup_lights(self):
-        pass
+        # Start in bright daytime by default.
+        self.time = 0.10
+        logger.info("DayNightCycle initialized (single directional + ambient mode).")
 
     def _setup_color_gradient(self):
-        # Time -> Color mapping
+        # Time -> Color mapping.
+        # Keep a minimum ambient floor to avoid near-black world lighting.
         self.sky_colors = {
-            0.0: (0.53, 0.8, 0.92), # Noon
-            0.20: (0.9, 0.6, 0.3),  # Sunset
-            0.30: (0.1, 0.1, 0.3),  # Twilight
-            0.5: (0.0, 0.0, 0.0),   # Midnight (Pitch Black for testing)
-            0.70: (0.1, 0.1, 0.3),  # Twilight
-            0.80: (0.9, 0.6, 0.3),  # Sunrise
-            1.0: (0.53, 0.8, 0.92)  # Noon
+            0.0: (0.53, 0.8, 0.92),   # Noon
+            0.20: (0.95, 0.64, 0.38), # Sunset
+            0.30: (0.25, 0.24, 0.36), # Twilight
+            0.5: (0.07, 0.09, 0.16),  # Midnight
+            0.70: (0.25, 0.24, 0.36), # Twilight
+            0.80: (0.95, 0.64, 0.38), # Sunrise
+            1.0: (0.53, 0.8, 0.92),   # Noon
         }
         self.sun_colors = {
-            0.0: (1.0, 1.0, 0.9),
-            0.20: (1.0, 0.8, 0.6),
-            0.30: (0.0, 0.0, 0.0), # Fade to black
-            0.5: (0.0, 0.0, 0.0),
-            0.70: (0.0, 0.0, 0.0),
-            0.80: (1.0, 0.8, 0.6),
-            1.0: (1.0, 1.0, 0.9)
-        }
-        self.moon_colors = {
-            0.0: (0.0, 0.0, 0.0),
-            0.20: (0.0, 0.0, 0.0),
-            0.30: (0.05, 0.05, 0.1), # Fade in (Dim)
-            0.5: (0.1, 0.1, 0.15),   # Full moon light (Dim)
-            0.70: (0.05, 0.05, 0.1),
-            0.80: (0.0, 0.0, 0.0),
-            1.0: (0.0, 0.0, 0.0)
+            0.0: (1.0, 0.98, 0.92),
+            0.20: (1.0, 0.80, 0.62),
+            0.30: (0.55, 0.58, 0.72),
+            0.5: (0.32, 0.40, 0.58),
+            0.70: (0.55, 0.58, 0.72),
+            0.80: (1.0, 0.80, 0.62),
+            1.0: (1.0, 0.98, 0.92),
         }
         self.ambient_colors = {
-            0.0: (0.4, 0.4, 0.4),
-            0.20: (0.3, 0.2, 0.2),
-            0.30: (0.1, 0.1, 0.15),
-            0.5: (0.01, 0.01, 0.02), # Almost pitch black ambient
-            0.70: (0.1, 0.1, 0.15),
-            0.80: (0.3, 0.2, 0.2),
-            1.0: (0.4, 0.4, 0.4)
+            0.0: (0.34, 0.35, 0.39),
+            0.20: (0.30, 0.26, 0.28),
+            0.30: (0.22, 0.22, 0.28),
+            0.5: (0.18, 0.19, 0.25),  # Never drop to near-black.
+            0.70: (0.22, 0.22, 0.28),
+            0.80: (0.30, 0.26, 0.28),
+            1.0: (0.34, 0.35, 0.39),
         }
 
     def get_required_components(self):
@@ -89,22 +76,27 @@ class DayNightCycle(System):
         center_pos = np.array([0, 0, 0], dtype=np.float32)
         if self.target:
             center_pos = self.target.get_world_position()
-            
-        angle = self.time * 2 * math.pi
 
-        sun_h = math.cos(angle) * self.orbit_radius # Height (+Z)
-        sun_w = -math.sin(angle) * self.orbit_radius # East/West (-X)
+        # Full sky orbit:
+        # - Azimuth rotates around the world (X/Y), so shadow direction clearly changes.
+        # - Elevation controls day vs night (Z).
+        angle = self.time * 2.0 * math.pi
+        horiz_radius = self.orbit_radius * 0.85
+
+        sun_x = math.cos(angle) * horiz_radius
+        sun_y = math.sin(angle) * horiz_radius
+        sun_z = math.cos(angle) * self.orbit_radius
 
         sun_pos = np.array([
-            center_pos[0] + sun_w,
-            center_pos[1],
-            center_pos[2] + sun_h
+            center_pos[0] + sun_x,
+            center_pos[1] + sun_y,
+            center_pos[2] + sun_z,
         ], dtype=np.float32)
-        
+
         moon_pos = np.array([
-            center_pos[0] - sun_w,
-            center_pos[1],
-            center_pos[2] - sun_h
+            center_pos[0] - sun_x,
+            center_pos[1] - sun_y,
+            center_pos[2] - sun_z,
         ], dtype=np.float32)
         
         # Update Entities
@@ -118,7 +110,7 @@ class DayNightCycle(System):
             t.set_world_position(moon_pos)
             self._look_at(t, center_pos)
             
-        self._update_colors(sun_h)
+        self._update_colors(sun_z)
 
     def _look_at(self, transform, target_pos):
         origin = transform.get_world_position()
@@ -141,7 +133,7 @@ class DayNightCycle(System):
         rot_mat[:, 2] = up
         
         from aurora_engine.utils.math import matrix_to_quaternion
-        transform.local_rotation = matrix_to_quaternion(rot_mat)
+        transform.set_world_rotation(matrix_to_quaternion(rot_mat))
 
     def _interpolate_color(self, gradient, time):
         keys = sorted(gradient.keys())
@@ -163,9 +155,17 @@ class DayNightCycle(System):
 
     def _update_colors(self, sun_height):
         sky_color = self._interpolate_color(self.sky_colors, self.time)
-        sun_color = self._interpolate_color(self.sun_colors, self.time)
-        moon_color = self._interpolate_color(self.moon_colors, self.time)
-        ambient_color = self._interpolate_color(self.ambient_colors, self.time)
+
+        # Day factor from sun elevation. Keeps ambient stable at night.
+        day_factor = max(0.0, min(1.0, (sun_height / self.orbit_radius + 1.0) * 0.5))
+        # Robust physically-inspired day/night blend.
+        sun_day = np.array([1.0, 0.98, 0.92], dtype=np.float32)
+        sun_night = np.array([0.35, 0.42, 0.58], dtype=np.float32)
+        ambient_day = np.array([0.34, 0.35, 0.39], dtype=np.float32)
+        ambient_night = np.array([0.14, 0.16, 0.22], dtype=np.float32)
+
+        sun_color = sun_night * (1.0 - day_factor) + sun_day * day_factor
+        ambient_color = ambient_night * (1.0 - day_factor) + ambient_day * day_factor
         
         # Apply colors
         if hasattr(self.renderer.backend, 'base'):
@@ -182,13 +182,17 @@ class DayNightCycle(System):
             light = self.sun_entity.get_component(DirectionalLight)
             if light:
                 light.color = sun_color
+                # Make day/night change clearly visible on terrain.
+                light.intensity = 0.10 + 1.50 * day_factor
 
         if self.moon_entity:
             light = self.moon_entity.get_component(DirectionalLight)
             if light:
-                light.color = moon_color
+                light.color = np.array([0.30, 0.36, 0.50], dtype=np.float32)
+                light.intensity = 0.10 + 0.25 * (1.0 - day_factor)
 
         if self.ambient_entity:
             light = self.ambient_entity.get_component(AmbientLight)
             if light:
                 light.color = ambient_color
+                light.intensity = 1.00

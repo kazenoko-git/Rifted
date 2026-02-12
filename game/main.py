@@ -24,7 +24,7 @@ from game.managers.player_manager import PlayerManager
 from game.managers.ai_manager import AIManager
 from game.managers.debug_manager import DebugManager
 from game.managers.game_ui_manager import GameUIManager
-from game.managers.environment_manager import EnvironmentManager
+from panda3d.core import Filename, getModelPath
 
 logger = get_logger()
 
@@ -51,7 +51,9 @@ class Eternae(Application):
 
         self.debug_manager = DebugManager(self.world, self.renderer, self.input, self.physics, self.ui)
         self.game_ui_manager = GameUIManager(self.ui, self.config)
-        self.environment_manager = EnvironmentManager(self.world, self.renderer, self.world_manager)
+
+        # Unified forward pipeline: shared shadow include + world/character shader pair.
+        self._configure_unified_forward_pipeline()
         
         # Setup World
         self.world_manager.initialize_world()
@@ -68,8 +70,9 @@ class Eternae(Application):
         h = self.world_manager.get_ground_height(0, 0)
         self.player.get_component(Transform).set_world_position(np.array([0, 0, h + 5.0], dtype=np.float32))
 
-        # Setup Environment (Day/Night, Fog, etc)
-        self.environment_manager.setup(self.player.get_component(Transform))
+        # Unified environment: one directional light (with shadows) + one ambient fill.
+        # Intentionally not using the old day/night stack to keep a single-light pipeline.
+        self._setup_unified_lighting()
         
         # Setup UI
         self.game_ui_manager.setup_ui()
@@ -78,9 +81,6 @@ class Eternae(Application):
         dialogue_system = DialogueSystem(self.ui)
         dialogue_system.ai_manager = self.ai_manager
         self.world.add_system(dialogue_system)
-        
-        # --- DIAGNOSTIC: LIGHTING TEST ---
-        self._setup_diagnostic_lighting()
 
     def _setup_database(self):
         """Initialize database connection."""
@@ -94,56 +94,74 @@ class Eternae(Application):
         self.db_manager.connect()
         DatabaseSchema.create_tables(self.db_manager)
 
-    def _setup_diagnostic_lighting(self):
-        """Force a simple test case for lighting diagnostics."""
-        logger.info("=== DIAGNOSTIC LIGHTING SETUP ===")
+    def _configure_unified_forward_pipeline(self):
+        """Load and activate unified forward shaders for world and characters."""
+        shader_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "shaders"))
+        getModelPath().appendDirectory(Filename.fromOsSpecific(shader_dir))
+
+        world_shader = self.renderer._load_glsl_shader_with_includes(
+            os.path.join(shader_dir, "world_pbr.vert"),
+            os.path.join(shader_dir, "world_pbr.frag"),
+        )
+        toon_shader = self.renderer._load_glsl_shader_with_includes(
+            os.path.join(shader_dir, "character_toon.vert"),
+            os.path.join(shader_dir, "character_toon.frag"),
+        )
+
+        if world_shader:
+            self.renderer._shader_world = world_shader
+        if toon_shader:
+            self.renderer._shader_toon = toon_shader
+
+        if not world_shader or not toon_shader:
+            missing = []
+            if not world_shader:
+                missing.append("world_pbr")
+            if not toon_shader:
+                missing.append("character_toon")
+            raise RuntimeError(f"Unified shader compile failed: {', '.join(missing)}")
+
+        # Keep the renderer on built-in shaders and disable complexpbr fallback.
+        self.renderer.force_builtin_world_shader = True
+        logger.info("Unified forward shaders configured (world_pbr + character_toon).")
+
+    def _setup_unified_lighting(self):
+        """Create a single shadow-casting directional light and one ambient fill."""
         from aurora_engine.rendering.light import DirectionalLight, AmbientLight
-        from aurora_engine.rendering.mesh import MeshRenderer, create_cube_mesh, create_plane_mesh
-        from aurora_engine.scene.transform import Transform
-        from aurora_engine.utils.math import quaternion_from_euler
-        from aurora_engine.physics.collider import Collider, BoxCollider
-        from aurora_engine.physics.rigidbody import StaticBody
-        import numpy as np
+        from game.systems.day_night_cycle import DayNightCycle
 
-        # 1. Ground Plane (Receiver)
-        ground = self.world.create_entity()
-        ground.add_component(Transform())
-        ground.get_component(Transform).set_world_position(np.array([0, 0, 0], dtype=np.float32))
-        ground.get_component(Transform).set_local_scale(np.array([20, 20, 1], dtype=np.float32))
-        ground.add_component(MeshRenderer(mesh=create_plane_mesh(), color=(0.5, 0.5, 0.5, 1.0), shading_model="world"))
-        
-        # Add Physics so player stands on it (Size 20x20x0.1)
-        ground.add_component(Collider(BoxCollider(np.array([20.0, 20.0, 0.1], dtype=np.float32))))
-        ground.add_component(StaticBody())
+        # Single directional light for the entire forward pipeline.
+        self.sun = self.world.create_entity()
+        self.sun.add_component(Transform())
+        self.sun.get_component(Transform).set_world_position(np.array([160.0, -80.0, 220.0], dtype=np.float32))
 
-        # 2. Floating Cube (Caster)
-        cube = self.world.create_entity()
-        cube.add_component(Transform())
-        cube.get_component(Transform).set_world_position(np.array([2.0, 0.0, 2.0], dtype=np.float32))
-        # Rotate slightly to see shading
-        q_cube = quaternion_from_euler(np.radians(np.array([45.0, 45.0, 0.0], dtype=np.float32)))
-        cube.get_component(Transform).set_world_rotation(q_cube)
-        cube.add_component(MeshRenderer(mesh=create_cube_mesh(), color=(1.0, 0.2, 0.2, 1.0), shading_model="character"))
-
-        # 3. Directional Light (Sun)
-        sun = self.world.create_entity()
-        sun.add_component(Transform())
-        sun.get_component(Transform).set_world_position(np.array([0, -10, 20], dtype=np.float32))
-        # Look down-forward (Pitch -60)
-        q_sun = quaternion_from_euler(np.radians(np.array([-60.0, 0.0, 0.0], dtype=np.float32)))
-        sun.get_component(Transform).set_world_rotation(q_sun)
-        
-        dlight = DirectionalLight(color=(1.0, 0.95, 0.8), intensity=1.5)
+        dlight = DirectionalLight(color=(1.0, 0.96, 0.90), intensity=1.35)
         dlight.cast_shadows = True
         dlight.shadow_map_size = 2048
-        dlight.shadow_film_size = 50.0 # Ensure it covers the scene
-        sun.add_component(dlight)
+        dlight.shadow_film_size = 900.0
+        dlight.shadow_near_far = (1.0, 2000.0)
+        self.sun.add_component(dlight)
 
-        # 4. Weak Ambient Light
-        amb = self.world.create_entity()
-        amb.add_component(AmbientLight(color=(0.1, 0.1, 0.2), intensity=0.3))
-        
-        logger.info("Diagnostic Scene Created: Ground Plane, Red Cube, Sun (Shadows ON), Weak Ambient.")
+        # Ambient fill (non-shadowing).
+        self.ambient = self.world.create_entity()
+        self.ambient.add_component(AmbientLight(color=(0.26, 0.27, 0.32), intensity=0.95))
+
+        # Re-enable day/night movement with a single directional light.
+        # This keeps lighting alive over time without adding moon/multi-shadow lights.
+        day_night = DayNightCycle(self.renderer, day_duration=120.0)
+        day_night.target = self.player.get_component(Transform)
+        day_night.sun_entity = self.sun
+        day_night.ambient_entity = self.ambient
+        day_night.moon_entity = None
+        day_night.orbit_radius = 520.0
+        self.world.add_system(day_night)
+
+        if hasattr(self.renderer.backend, "scene_graph"):
+            sg = self.renderer.backend.scene_graph
+            sg.setShaderInput("u_shadowBias", 0.0015)
+            sg.setShaderInput("u_shadowPcfRadius", 1.0)
+
+        logger.info("Unified lighting active: 1 directional light (shadow map 2048) + ambient fill.")
 
     def update(self, dt: float, alpha: float):
         """Override update to update managers."""

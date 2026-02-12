@@ -23,6 +23,7 @@ uniform p3d_LightSourceParameters p3d_LightSource[1];
 
 // World-space vector that points FROM the shaded point TO the directional light.
 uniform vec3 u_lightDirection;
+uniform vec3 u_lightColor;
 
 // Base bias for shadow depth comparison. Typical values: 0.0008 - 0.003.
 uniform float u_shadowBias;
@@ -108,7 +109,7 @@ vec3 computeDirectionalLight(
     float specular = pow(nDotH, specPower) * nDotL * specStrength;
 
     vec3 diffuse = albedo * nDotL;
-    vec3 lightColor = p3d_LightSource[0].color.rgb;
+    vec3 lightColor = u_lightColor;
     return (diffuse + vec3(specular)) * lightColor;
 }
 

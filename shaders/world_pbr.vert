@@ -4,6 +4,7 @@
 in vec4 p3d_Vertex;
 in vec3 p3d_Normal;
 in vec2 p3d_MultiTexCoord0;
+in vec4 p3d_Color;
 
 uniform mat4 p3d_ModelMatrix;
 uniform mat4 p3d_ModelViewProjectionMatrix;
@@ -30,6 +31,7 @@ uniform p3d_LightSourceParameters p3d_LightSource[1];
 out vec3 v_worldPos;
 out vec3 v_worldNormal;
 out vec2 v_uv;
+out vec4 v_color;
 out vec4 v_shadowCoord;
 
 void main() {
@@ -41,6 +43,7 @@ void main() {
     v_worldNormal = normalize(normalMatrix * p3d_Normal);
 
     v_uv = p3d_MultiTexCoord0;
+    v_color = p3d_Color;
 
     // Required shadow matrix source for this pipeline.
     v_shadowCoord = p3d_LightSource[0].shadowMatrix * worldPos;
